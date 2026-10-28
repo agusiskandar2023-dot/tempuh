@@ -27,4 +27,16 @@ void main() {
     expect(c.cloudIdFor(act('hc-abc'), null), hc); // deterministik
     expect(c.cloudIdFor(act(phone), 'existing-id'), 'existing-id');
   });
+
+  test('cookie sesi Neon Auth diambil dari Set-Cookie gabungan', () {
+    const header =
+        '__Secure-neonauth.session_token=abc.DEF%3D; Max-Age=604800; Domain=x; Path=/; '
+        'Expires=Thu, 05 Nov 2026 22:00:43 GMT; HttpOnly; Secure; SameSite=None,'
+        '__Secure-neonauth.session_data=xyz; Path=/; Expires=Thu, 05 Nov 2026 22:05:43 GMT; Secure';
+    expect(parseAuthCookies(header), {
+      '__Secure-neonauth.session_token': 'abc.DEF%3D',
+      '__Secure-neonauth.session_data': 'xyz',
+    });
+    expect(parseAuthCookies(null), isEmpty);
+  });
 }

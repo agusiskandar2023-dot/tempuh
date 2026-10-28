@@ -42,6 +42,21 @@ String stableUuid(String text) {
       '${h.substring(16, 20)}-${h.substring(20)}';
 }
 
+final _cookieRe = RegExp(
+    r'(?:^|[;,]\s*)((?:__Secure-|__Host-)?[A-Za-z0-9_.-]*auth[A-Za-z0-9_.-]*)=([^;,\s]*)');
+
+/// Mengambil cookie Neon Auth dari header Set-Cookie. dart:io menggabungkan
+/// beberapa Set-Cookie dengan koma, dan tanggal Expires juga berisi koma,
+/// jadi hanya cookie yang namanya mengandung "auth" yang diambil.
+Map<String, String> parseAuthCookies(String? setCookie) {
+  final out = <String, String>{};
+  if (setCookie == null || setCookie.isEmpty) return out;
+  for (final m in _cookieRe.allMatches(setCookie)) {
+    out[m.group(1)!] = m.group(2)!;
+  }
+  return out;
+}
+
 final _uuidRe = RegExp(
     r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$');
 
@@ -67,6 +82,10 @@ class CloudService extends ChangeNotifier {
   final _storage = const FlutterSecureStorage();
 
   String? _session;
+
+  /// Cookie sesi dari Neon Auth (nama -> nilai), dikirim balik seperti
+  /// browser. Neon Auth mengenali sesi lewat cookie, bukan bearer token.
+  final Map<String, String> _cookies = {};
   String? _jwt;
   int _jwtExp = 0;
 
@@ -77,6 +96,9 @@ class CloudService extends ChangeNotifier {
   DateTime? lastSync;
   String? lastError;
   int pending = 0;
+
+  /// Info diagnosa singkat (langkah auth terakhir + status HTTP).
+  String? lastAuthStatus;
 
   /// Dipanggil setelah sinkron mengubah data lokal (misalnya menarik
   /// aktivitas dari web), agar daftar di layar dimuat ulang.
@@ -89,6 +111,10 @@ class CloudService extends ChangeNotifier {
   Future<void> init() async {
     try {
       _session = await _storage.read(key: 'neon_session');
+      final c = await _storage.read(key: 'neon_cookies');
+      if (c != null) {
+        _cookies.addAll(Map<String, String>.from(jsonDecode(c) as Map));
+      }
       userId = await _storage.read(key: 'neon_user_id');
       email = await _storage.read(key: 'neon_email');
       name = await _storage.read(key: 'neon_name');
@@ -110,7 +136,19 @@ class CloudService extends ChangeNotifier {
         'Content-Type': 'application/json',
         'Origin': CloudConfig.origin,
         if (_session != null) 'Authorization': 'Bearer $_session',
+        if (_cookies.isNotEmpty)
+          'Cookie': _cookies.entries.map((e) => '${e.key}=${e.value}').join('; '),
       };
+
+  void _captureCookies(String? setCookie) {
+    parseAuthCookies(setCookie).forEach((name, value) {
+      if (value.isEmpty) {
+        _cookies.remove(name);
+      } else {
+        _cookies[name] = value;
+      }
+    });
+  }
 
   Future<Map<String, dynamic>?> _auth(String path,
       {String method = 'GET', Map<String, dynamic>? body}) async {
@@ -120,7 +158,9 @@ class CloudService extends ChangeNotifier {
         : await _http.get(uri, headers: _authHeaders());
     final bearer = res.headers['set-auth-token'];
     if (bearer != null && bearer.isNotEmpty) _session = bearer;
+    _captureCookies(res.headers['set-cookie']);
     _rememberJwt(res.headers['set-auth-jwt']);
+    lastAuthStatus = '$path → HTTP ${res.statusCode}';
     dynamic data;
     try {
       data = res.body.isEmpty ? null : jsonDecode(res.body);
@@ -182,6 +222,7 @@ class CloudService extends ChangeNotifier {
     }
     if (userId == null) throw CloudException('Tidak bisa membaca data akun.');
     await _storage.write(key: 'neon_session', value: _session);
+    await _storage.write(key: 'neon_cookies', value: jsonEncode(_cookies));
     await _storage.write(key: 'neon_user_id', value: userId);
     await _storage.write(key: 'neon_email', value: email);
     if (name != null) await _storage.write(key: 'neon_name', value: name);
@@ -207,11 +248,12 @@ class CloudService extends ChangeNotifier {
       await _auth('/sign-out', method: 'POST');
     } catch (_) {}
     _session = null;
+    _cookies.clear();
     _jwt = null;
     userId = null;
     email = null;
     name = null;
-    for (final k in ['neon_session', 'neon_user_id', 'neon_email', 'neon_name', 'last_sync']) {
+    for (final k in ['neon_session', 'neon_cookies', 'neon_user_id', 'neon_email', 'neon_name', 'last_sync']) {
       await _storage.delete(key: k);
     }
     lastSync = null;
@@ -221,15 +263,27 @@ class CloudService extends ChangeNotifier {
   Future<String> _getJwt() async {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     if (_jwt != null && _jwtExp - 60 > now) return _jwt!;
+    String? step1, step2;
     try {
       final data = await _auth('/token');
       _rememberJwt(data?['token'] as String?);
-    } catch (_) {}
+    } catch (e) {
+      step1 = '$e';
+    }
+    step1 ??= lastAuthStatus;
     if (_jwt == null || _jwtExp - 60 <= now) {
-      await _auth('/get-session');
+      try {
+        final s = await _auth('/get-session');
+        if (s == null || s['user'] == null) step2 = 'get-session kosong';
+      } catch (e) {
+        step2 = '$e';
+      }
+      step2 ??= lastAuthStatus;
     }
     if (_jwt == null || _jwtExp - 60 <= now) {
-      throw CloudException('Sesi berakhir. Silakan masuk lagi.', 401);
+      final noCookie = _cookies.isEmpty ? ' (cookie sesi belum ada — keluar lalu masuk lagi)' : '';
+      throw CloudException(
+          'Sesi tidak dikenali server$noCookie. [token: $step1; session: $step2]', 401);
     }
     return _jwt!;
   }
@@ -345,9 +399,6 @@ class CloudService extends ChangeNotifier {
       return SyncResult(pushed, pulled, deleted);
     } on CloudException catch (e) {
       lastError = e.message;
-      if (e.status == 401) {
-        lastError = 'Sesi berakhir. Silakan masuk lagi.';
-      }
       return null;
     } catch (e) {
       lastError = 'Sinkron gagal: $e';

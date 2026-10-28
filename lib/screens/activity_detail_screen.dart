@@ -197,7 +197,7 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
     );
   }
 
-  Widget _splitTable(List<Split> splits, SportType sport) {
+  Widget _splitTable(List<ActivitySplit> splits, SportType sport) {
     final fastest = splits
         .where((s) => s.distanceMeters >= 999)
         .fold<double?>(null, (m, s) => m == null || s.paceSecondsPerKm < m ? s.paceSecondsPerKm : m);

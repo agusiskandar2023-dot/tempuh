@@ -96,12 +96,12 @@ class TrackPoint {
       );
 }
 
-class Split {
+class ActivitySplit {
   final int number;
   final double distanceMeters;
   final int durationSeconds;
 
-  const Split(this.number, this.distanceMeters, this.durationSeconds);
+  const ActivitySplit(this.number, this.distanceMeters, this.durationSeconds);
 
   /// detik per km
   double get paceSecondsPerKm =>

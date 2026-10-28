@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'core/theme.dart';
 import 'data/activity_store.dart';
 import 'data/database.dart';
+import 'models/activity.dart';
 import 'screens/activity_detail_screen.dart';
 import 'screens/garmin_screen.dart';
 import 'screens/history_screen.dart';

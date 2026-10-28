@@ -135,15 +135,15 @@ class MetricsCalculator {
     return d / dt;
   }
 
-  List<Split> splits({double splitMeters = 1000}) =>
+  List<ActivitySplit> splits({double splitMeters = 1000}) =>
       computeSplits(points, splitMeters: splitMeters);
 }
 
 /// Split per [splitMeters] berdasarkan waktu bergerak antar titik (jeda
 /// pause tidak dihitung). Split terakhir yang parsial disertakan bila
 /// panjangnya minimal 50 m.
-List<Split> computeSplits(List<TrackPoint> pts, {double splitMeters = 1000}) {
-  final result = <Split>[];
+List<ActivitySplit> computeSplits(List<TrackPoint> pts, {double splitMeters = 1000}) {
+  final result = <ActivitySplit>[];
   double segDist = 0;
   double segTime = 0;
   for (var i = 1; i < pts.length; i++) {
@@ -156,7 +156,7 @@ List<Split> computeSplits(List<TrackPoint> pts, {double splitMeters = 1000}) {
       final need = splitMeters - segDist;
       final frac = need / d;
       segTime += t * frac;
-      result.add(Split(result.length + 1, splitMeters, segTime.round()));
+      result.add(ActivitySplit(result.length + 1, splitMeters, segTime.round()));
       d -= need;
       t -= t * frac;
       segDist = 0;
@@ -166,7 +166,7 @@ List<Split> computeSplits(List<TrackPoint> pts, {double splitMeters = 1000}) {
     segTime += t;
   }
   if (segDist >= 50) {
-    result.add(Split(result.length + 1, segDist, segTime.round()));
+    result.add(ActivitySplit(result.length + 1, segDist, segTime.round()));
   }
   return result;
 }

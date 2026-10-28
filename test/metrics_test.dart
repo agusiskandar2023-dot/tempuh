@@ -60,7 +60,7 @@ void main() {
 
   test('elevasi memakai histeresis 3 m', () {
     final c = MetricsCalculator(SportType.cycling);
-    final alts = [10.0, 11, 10, 12, 15, 14, 20, 19, 25];
+    final alts = <double>[10, 11, 10, 12, 15, 14, 20, 19, 25];
     for (var i = 0; i < alts.length; i++) {
       c.add(pt(i, i * 2, i * 10.0, alt: alts[i]));
     }

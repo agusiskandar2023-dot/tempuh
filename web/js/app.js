@@ -539,6 +539,18 @@ async function saveAll() {
 async function boot() {
   $('#auth-form').addEventListener('submit', onAuthSubmit);
   $('#auth-switch').addEventListener('click', () => setAuthMode(!registering));
+  $('#toggle-pass').addEventListener('click', () => {
+    const input = $('#auth-pass');
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    const btn = $('#toggle-pass');
+    btn.setAttribute('aria-pressed', String(show));
+    btn.setAttribute('aria-label', show ? 'Sembunyikan kata sandi' : 'Tampilkan kata sandi');
+    $('#eye-icon').innerHTML = show
+      ? '<path d="M3 3l18 18M10.6 10.6a3 3 0 0 0 4.2 4.2M9.9 5.2A9.8 9.8 0 0 1 12 5c6.5 0 10 7 10 7a17.6 17.6 0 0 1-3.2 4.1M6.6 6.6A17.4 17.4 0 0 0 2 12s3.5 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/>'
+      : '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>';
+    input.focus();
+  });
   $('#logout').addEventListener('click', async () => {
     await signOut();
     state.user = null;

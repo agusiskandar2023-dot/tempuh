@@ -127,6 +127,18 @@ def patch_main_activity():
             f.write(src)
 
 
+SIGNING_KTS = """    signingConfigs {
+        create("tempuh") {
+            storeFile = rootProject.file("../ci/debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
+"""
+
+
 def patch_gradle():
     paths = glob.glob("android/app/build.gradle.kts") + glob.glob("android/app/build.gradle")
     if not paths:
@@ -136,6 +148,12 @@ def patch_gradle():
             g = f.read()
         if path.endswith(".kts"):
             g = re.sub(r"minSdk\s*=\s*[^\n]+", "minSdk = 26", g)
+            # Tanda tangan tetap: semua build memakai ci/debug.keystore agar
+            # APK baru bisa dipasang sebagai Update (bukan uninstall).
+            if 'create("tempuh")' not in g:
+                g = g.replace("    buildTypes {", SIGNING_KTS + "    buildTypes {", 1)
+            g = g.replace('signingConfig = signingConfigs.getByName("debug")',
+                          'signingConfig = signingConfigs.getByName("tempuh")')
         else:
             g = re.sub(r"minSdkVersion\s+[^\n]+", "minSdkVersion 26", g)
             g = re.sub(r"minSdk\s*=\s*[^\n]+", "minSdk = 26", g)

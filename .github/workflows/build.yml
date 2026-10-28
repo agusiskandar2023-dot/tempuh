@@ -1,0 +1,57 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-apk
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Analyze, test, build
+        run: bash ci/build.sh
+
+      - name: Publish release (APK)
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp build/app/outputs/flutter-apk/app-release.apk MoveTrackAI.apk
+          TAG="v0.1.${{ github.run_number }}"
+          gh release create "$TAG" MoveTrackAI.apk \
+            --title "MoveTrack AI $TAG" \
+            --notes "Build otomatis dari commit ${{ github.sha }}. Unduh MoveTrackAI.apk lalu pasang di HP Android." \
+            --latest
+
+      - name: Save build log to ci-logs branch
+        if: always()
+        run: |
+          [ -f ci-log.txt ] && cp ci-log.txt /tmp/log.txt || echo "no log" > /tmp/log.txt
+          mkdir -p /tmp/logrepo && cd /tmp/logrepo
+          git init -q
+          cp /tmp/log.txt log.txt
+          echo "${{ github.sha }} ${{ job.status }} run ${{ github.run_number }}" > status.txt
+          git add .
+          git -c user.name=ci -c user.email=ci@users.noreply.github.com commit -qm "build log ${{ github.run_number }}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" HEAD:ci-logs

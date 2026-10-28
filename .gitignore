@@ -1,0 +1,22 @@
+# Flutter / Dart
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+pubspec.lock
+*.iml
+.idea/
+.vscode/
+
+# Folder platform dibuat otomatis oleh ci/build.sh (flutter create + patch)
+/android/
+/ios/
+/linux/
+/macos/
+/windows/
+/web/
+
+ci-log.txt

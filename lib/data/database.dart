@@ -61,10 +61,19 @@ class AppDatabase {
     );
   }
 
+  /// Simpan atau perbarui aktivitas.
+  ///
+  /// Sengaja TIDAK memakai INSERT OR REPLACE: REPLACE menghapus baris lama
+  /// lebih dulu, dan karena activity_points memakai ON DELETE CASCADE,
+  /// seluruh titik rute ikut terhapus setiap checkpoint (bug v0.2.3).
   Future<void> upsertActivity(Activity a) async {
     final d = await db;
-    await d.insert('activities', a.toMap(),
-        conflictAlgorithm: ConflictAlgorithm.replace);
+    final m = a.toMap();
+    await d.transaction((txn) async {
+      final updated =
+          await txn.update('activities', m, where: 'id = ?', whereArgs: [a.id]);
+      if (updated == 0) await txn.insert('activities', m);
+    });
   }
 
   /// Menulis sekumpulan titik dalam satu transaksi (checkpoint).

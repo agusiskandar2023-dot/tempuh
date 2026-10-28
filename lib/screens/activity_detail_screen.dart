@@ -10,6 +10,7 @@ import '../models/activity.dart';
 import '../services/health_service.dart';
 import '../widgets/route_map.dart';
 import '../widgets/stat_tile.dart';
+import 'home_screen.dart';
 
 class ActivityDetailScreen extends StatefulWidget {
   final String activityId;
@@ -46,6 +47,7 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
   Future<void> _fetchHeartRate() async {
     final a = _a!;
     final health = context.read<HealthService>();
+    final store = context.read<ActivityStore>();
     final messenger = ScaffoldMessenger.of(context);
     setState(() => _fetchingHr = true);
     try {
@@ -67,7 +69,8 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
         return;
       }
       final updated = a.copyWith(avgHeartRate: hr.avg, maxHeartRate: hr.max);
-      await context.read<ActivityStore>().update(updated);
+      await store.update(updated);
+      if (!mounted) return;
       setState(() => _a = updated);
       messenger.showSnackBar(SnackBar(
           content: Text('Detak jantung ditambahkan dari ${hr.samples} sampel.')));
@@ -82,6 +85,7 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.charcoal,
         title: const Text('Hapus aktivitas?'),
         content: const Text('Data rute dan metrik akan dihapus permanen.'),
         actions: [
@@ -90,7 +94,7 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
               child: const Text('Batal')),
           TextButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Hapus')),
+              child: const Text('Hapus', style: TextStyle(color: AppColors.danger))),
         ],
       ),
     );
@@ -112,18 +116,31 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
     }
     final route = _pts.map((p) => LatLng(p.latitude, p.longitude)).toList();
     final splits = computeSplits(_pts);
-    final date = DateFormat('EEEE, d MMMM yyyy • HH:mm', 'id_ID').format(a.startedAt);
+    final date =
+        DateFormat('EEEE, d MMMM yyyy · HH:mm', 'id_ID').format(a.startedAt);
+    String km(double m) => formatKm(m).replaceAll('.', ',');
     return Scaffold(
       appBar: AppBar(
-        title: Text(a.sport.label),
+        titleSpacing: 0,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(activityTitle(a),
+                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+            Text(date, style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+          ],
+        ),
         actions: [
-          IconButton(onPressed: _delete, icon: const Icon(Icons.delete_outline)),
+          IconButton(
+              tooltip: 'Hapus',
+              onPressed: _delete,
+              icon: const Icon(Icons.delete_outline)),
         ],
       ),
       body: ListView(
         children: [
           SizedBox(
-            height: 300,
+            height: 240,
             child: route.length >= 2
                 ? RouteMap(route: route)
                 : Container(
@@ -134,60 +151,90 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
                   ),
           ),
           Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(date, style: const TextStyle(color: AppColors.muted)),
                 if (a.source != ActivitySource.phone)
                   Padding(
-                    padding: const EdgeInsets.only(top: 4),
+                    padding: const EdgeInsets.only(bottom: 12),
                     child: Text(
                         'Sumber: ${a.source == ActivitySource.fitFile ? 'File .FIT' : 'Health Connect'}${a.sourceDevice == null ? '' : ' (${a.sourceDevice})'}',
                         style: const TextStyle(color: AppColors.lime, fontSize: 12)),
                   ),
-                const SizedBox(height: 16),
-                Wrap(
-                  spacing: 28,
-                  runSpacing: 16,
+                GridView.count(
+                  crossAxisCount: 3,
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  childAspectRatio: 1.9,
+                  mainAxisSpacing: 6,
+                  crossAxisSpacing: 8,
                   children: [
-                    StatTile('Jarak', formatKm(a.distanceMeters), unit: 'km'),
+                    StatTile('Jarak', km(a.distanceMeters), unit: 'km'),
                     StatTile('Waktu aktif', formatDuration(a.movingSeconds)),
                     a.sport.showsSpeed
-                        ? StatTile('Kecepatan rata-rata',
-                            a.avgSpeedKmh.toStringAsFixed(1), unit: 'km/j')
-                        : StatTile('Pace rata-rata',
-                            formatPace(a.avgPaceSecondsPerKm), unit: '/km'),
+                        ? StatTile('Kecepatan',
+                            a.avgSpeedKmh.toStringAsFixed(1).replaceAll('.', ','),
+                            unit: 'km/j')
+                        : StatTile('Pace rata-rata', formatPace(a.avgPaceSecondsPerKm),
+                            unit: '/km'),
+                    StatTile('Elevasi naik', a.elevationGainMeters.round().toString(),
+                        unit: 'm'),
+                    StatTile('Kalori (est.)', '${a.caloriesEstimated ?? '-'}'),
                     StatTile('Waktu total', formatDuration(a.elapsedSeconds)),
-                    StatTile('Elevasi naik',
-                        a.elevationGainMeters.round().toString(), unit: 'm'),
-                    StatTile('Kalori (estimasi)',
-                        '${a.caloriesEstimated ?? '-'}', unit: 'kkal'),
-                    if (a.avgHeartRate != null)
-                      StatTile('HR rata-rata', '${a.avgHeartRate}', unit: 'bpm'),
-                    if (a.maxHeartRate != null)
-                      StatTile('HR maks', '${a.maxHeartRate}', unit: 'bpm'),
                   ],
                 ),
-                if (a.avgHeartRate == null) ...[
-                  const SizedBox(height: 16),
-                  OutlinedButton.icon(
-                    onPressed: _fetchingHr ? null : _fetchHeartRate,
-                    icon: _fetchingHr
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.favorite_border),
-                    label: const Text('Ambil detak jantung dari Garmin'),
+                const SizedBox(height: 14),
+                Material(
+                  color: AppColors.charcoal,
+                  borderRadius: BorderRadius.circular(16),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    child: Row(children: [
+                      const Icon(Icons.favorite, color: AppColors.danger),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: a.avgHeartRate != null
+                            ? Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                      '${a.avgHeartRate} bpm rata-rata${a.maxHeartRate == null ? '' : ' · maks ${a.maxHeartRate}'}',
+                                      style: const TextStyle(
+                                          fontSize: 15, fontWeight: FontWeight.w700)),
+                                  Text(
+                                      a.source == ActivitySource.fitFile
+                                          ? 'Dari file .FIT Garmin'
+                                          : 'Dari Garmin Forerunner via Health Connect',
+                                      style: const TextStyle(
+                                          fontSize: 12, color: AppColors.muted)),
+                                ],
+                              )
+                            : const Text('Belum ada detak jantung',
+                                style: TextStyle(fontSize: 14, color: AppColors.soft)),
+                      ),
+                      if (a.avgHeartRate == null)
+                        TextButton(
+                          onPressed: _fetchingHr ? null : _fetchHeartRate,
+                          child: _fetchingHr
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(strokeWidth: 2))
+                              : const Text('Ambil dari Garmin'),
+                        ),
+                    ]),
                   ),
-                ],
+                ),
                 if (splits.isNotEmpty) ...[
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 20),
                   const Text('Split per km',
-                      style: TextStyle(fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 8),
-                  _splitTable(splits, a.sport),
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 10),
+                  ..._splitRows(splits, a.sport),
+                  const SizedBox(height: 4),
+                  const Text('Split tercepat ditandai hijau.',
+                      style: TextStyle(fontSize: 12, color: AppColors.muted)),
                 ],
               ],
             ),
@@ -197,26 +244,64 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
     );
   }
 
-  Widget _splitTable(List<ActivitySplit> splits, SportType sport) {
-    final fastest = splits
-        .where((s) => s.distanceMeters >= 999)
-        .fold<double?>(null, (m, s) => m == null || s.paceSecondsPerKm < m ? s.paceSecondsPerKm : m);
-    return Card(
-      child: Column(
-        children: [
-          for (final s in splits)
-            ListTile(
-              dense: true,
-              leading: Text('${s.distanceMeters >= 999 ? s.number : formatKm(s.distanceMeters)}',
-                  style: const TextStyle(fontWeight: FontWeight.w700)),
-              title: Text(sport.showsSpeed
-                  ? '${s.durationSeconds == 0 ? '--' : (s.distanceMeters / s.durationSeconds * 3.6).toStringAsFixed(1)} km/j'
-                  : '${formatPace(s.paceSecondsPerKm)} /km'),
-              trailing: Text(formatDuration(s.durationSeconds)),
-              tileColor: s.paceSecondsPerKm == fastest ? const Color(0x22A3E635) : null,
+  List<Widget> _splitRows(List<ActivitySplit> splits, SportType sport) {
+    final full = splits.where((s) => s.distanceMeters >= 999).toList();
+    final paces = (full.isEmpty ? splits : full).map((s) => s.paceSecondsPerKm);
+    final fastest = paces.reduce((a, b) => a < b ? a : b);
+    return [
+      for (final s in splits)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: Row(children: [
+            SizedBox(
+              width: 34,
+              child: Text(
+                  s.distanceMeters >= 999 ? '${s.number}' : formatKm(s.distanceMeters),
+                  style: TextStyle(
+                      fontSize: 13,
+                      color: s.paceSecondsPerKm == fastest
+                          ? AppColors.lime
+                          : AppColors.muted)),
             ),
-        ],
-      ),
-    );
+            SizedBox(
+              width: 64,
+              child: Text(
+                  sport.showsSpeed
+                      ? (s.durationSeconds == 0
+                          ? '--'
+                          : (s.distanceMeters / s.durationSeconds * 3.6)
+                              .toStringAsFixed(1)
+                              .replaceAll('.', ','))
+                      : formatPace(s.paceSecondsPerKm),
+                  style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: s.paceSecondsPerKm == fastest ? AppColors.lime : null)),
+            ),
+            Expanded(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(99),
+                child: LinearProgressIndicator(
+                  value: s.paceSecondsPerKm <= 0
+                      ? 0
+                      : (fastest / s.paceSecondsPerKm).clamp(0.05, 1.0),
+                  minHeight: 10,
+                  backgroundColor: AppColors.raised,
+                  color: s.paceSecondsPerKm == fastest
+                      ? AppColors.lime
+                      : const Color(0xFF64748B),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            SizedBox(
+              width: 48,
+              child: Text(formatDuration(s.durationSeconds),
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+            ),
+          ]),
+        ),
+    ];
   }
 }

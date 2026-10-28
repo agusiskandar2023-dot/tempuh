@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'dart:ui' show Color;
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -97,8 +98,11 @@ class TrackingService extends ChangeNotifier {
         distanceFilter: 0,
         intervalDuration: const Duration(seconds: 1),
         foregroundNotificationConfig: ForegroundNotificationConfig(
-          notificationTitle: 'MoveTrack AI sedang merekam',
-          notificationText: '${sport.label} — lokasi tetap direkam saat layar mati',
+          notificationTitle: 'Tempuh sedang merekam',
+          notificationText: '${sport.label} — tetap merekam saat layar mati',
+          notificationIcon:
+              const AndroidResource(name: 'ic_stat_tempuh', defType: 'drawable'),
+          color: const Color(0xFFA3E635),
           enableWakeLock: true,
           setOngoing: true,
         ),

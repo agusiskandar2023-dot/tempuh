@@ -7,7 +7,7 @@ void main() {
     await tester.pumpWidget(const MaterialApp(
       home: Scaffold(body: StatTile('Jarak', '5.00', unit: 'km')),
     ));
-    expect(find.text('5.00'), findsOneWidget);
-    expect(find.text('km'), findsOneWidget);
+    expect(find.text('Jarak'), findsOneWidget);
+    expect(find.textContaining('5.00 km', findRichText: true), findsOneWidget);
   });
 }

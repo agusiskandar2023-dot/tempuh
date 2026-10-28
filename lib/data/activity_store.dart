@@ -44,6 +44,20 @@ class ActivityStore extends ChangeNotifier {
 
   Future<List<TrackPoint>> points(String id) => _db.points(id);
 
+  /// Jarak per hari (meter) minggu berjalan, Senin..Minggu.
+  List<double> weekDailyMeters() {
+    final now = DateTime.now();
+    final monday = DateTime(now.year, now.month, now.day)
+        .subtract(Duration(days: now.weekday - 1));
+    final days = List<double>.filled(7, 0);
+    for (final a in items) {
+      if (a.startedAt.isBefore(monday)) continue;
+      final i = a.startedAt.weekday - 1;
+      days[i] += a.distanceMeters;
+    }
+    return days;
+  }
+
   /// Ringkasan minggu berjalan (Senin-Minggu).
   ({int count, double meters, int seconds}) thisWeek() {
     final now = DateTime.now();

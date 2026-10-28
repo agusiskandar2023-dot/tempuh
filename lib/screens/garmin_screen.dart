@@ -157,104 +157,181 @@ class _GarminScreenState extends State<GarminScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final fmt = DateFormat('EEE d MMM • HH:mm', 'id_ID');
+    final fmt = DateFormat('EEE d MMM · HH:mm', 'id_ID');
+    final connected = _workouts != null;
     return Scaffold(
-      appBar: AppBar(title: const Text('Garmin Forerunner')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Card(
-            child: Padding(
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
+          children: [
+            const Text('Garmin Forerunner',
+                style: TextStyle(
+                    fontSize: 26, fontWeight: FontWeight.w800, letterSpacing: -0.5)),
+            const SizedBox(height: 16),
+            Container(
               padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                  color: AppColors.charcoal, borderRadius: BorderRadius.circular(20)),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Row(children: [
-                    Icon(Icons.favorite, color: AppColors.lime),
-                    SizedBox(width: 8),
-                    Text('Lewat Health Connect',
-                        style: TextStyle(fontWeight: FontWeight.w700)),
+                  Row(children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                          color: AppColors.raised,
+                          borderRadius: BorderRadius.circular(14)),
+                      child: const Icon(Icons.favorite_border, color: AppColors.lime),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Health Connect',
+                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                          Text(
+                              connected
+                                  ? 'Terhubung · ${_workouts!.length} latihan ditemukan'
+                                  : 'Ketuk sinkron untuk membaca data jam',
+                              style: TextStyle(
+                                  fontSize: 13,
+                                  color: connected ? AppColors.lime : AppColors.muted)),
+                        ],
+                      ),
+                    ),
+                    IconButton.filled(
+                      tooltip: 'Sinkron',
+                      style: IconButton.styleFrom(
+                          backgroundColor: AppColors.raised,
+                          foregroundColor: AppColors.text,
+                          fixedSize: const Size(44, 44)),
+                      onPressed: _busy ? null : _loadHealthConnect,
+                      icon: const Icon(Icons.sync),
+                    ),
                   ]),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Sesi latihan, jarak, kalori, dan detak jantung yang disinkronkan Garmin Connect ke Health Connect. Rute GPS tidak ikut; untuk rute pakai impor .FIT.',
-                    style: TextStyle(color: AppColors.muted, fontSize: 13),
-                  ),
                   const SizedBox(height: 12),
-                  FilledButton.tonalIcon(
-                    onPressed: _busy ? null : _loadHealthConnect,
-                    icon: const Icon(Icons.sync),
-                    label: const Text('Baca latihan 30 hari terakhir'),
+                  const Text(
+                    'Latihan, jarak, kalori, dan detak jantung dari Garmin Connect. Rute GPS tidak ikut; gunakan impor .FIT untuk rute.',
+                    style: TextStyle(fontSize: 13, height: 1.5, color: AppColors.muted),
                   ),
                   if (_message != null) ...[
                     const SizedBox(height: 10),
-                    Text(_message!, style: const TextStyle(color: Colors.amber, fontSize: 13)),
+                    Text(_message!,
+                        style: const TextStyle(color: AppColors.amber, fontSize: 13)),
                     if (_message!.contains('belum terpasang'))
                       TextButton(
-                        onPressed: () => context.read<HealthService>().installHealthConnect(),
+                        onPressed: () =>
+                            context.read<HealthService>().installHealthConnect(),
                         child: const Text('Pasang Health Connect'),
                       ),
                   ],
                 ],
               ),
             ),
-          ),
-          if (_workouts != null && _workouts!.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            for (final w in _workouts!)
-              Card(
-                margin: const EdgeInsets.only(bottom: 8),
-                child: ListTile(
-                  leading: Icon(w.sport.icon,
-                      color: w.looksLikeGarmin ? AppColors.lime : AppColors.muted),
-                  title: Text(
-                      '${w.sport.label} • ${w.distanceMeters == null ? '-' : formatKm(w.distanceMeters!)} km'),
-                  subtitle: Text(
-                      '${fmt.format(w.from)} • ${formatDuration(w.to.difference(w.from).inSeconds)}\n${w.sourceName}'),
-                  isThreeLine: true,
-                  trailing: _imported.contains(w.activityId)
-                      ? const Icon(Icons.check_circle, color: AppColors.lime)
-                      : IconButton(
-                          icon: const Icon(Icons.download),
-                          onPressed: () => _importWorkout(w),
-                        ),
+            if (_workouts != null && _workouts!.isNotEmpty) ...[
+              const SizedBox(height: 18),
+              const Text('Latihan dari jam (30 hari)',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+              const SizedBox(height: 10),
+              for (final w in _workouts!) ...[
+                Container(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+                  decoration: BoxDecoration(
+                      color: AppColors.charcoal,
+                      borderRadius: BorderRadius.circular(18)),
+                  child: Row(children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                              '${w.sport.label} · ${w.distanceMeters == null ? '-' : formatKm(w.distanceMeters!).replaceAll('.', ',')} km',
+                              style: const TextStyle(
+                                  fontSize: 15, fontWeight: FontWeight.w700)),
+                          Text(
+                              '${fmt.format(w.from)} · ${formatDuration(w.to.difference(w.from).inSeconds)}',
+                              style: const TextStyle(
+                                  fontSize: 13, color: AppColors.muted)),
+                          Text(w.sourceName,
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  color: w.looksLikeGarmin
+                                      ? AppColors.lime
+                                      : AppColors.muted)),
+                        ],
+                      ),
+                    ),
+                    _imported.contains(w.activityId)
+                        ? OutlinedButton(
+                            style: OutlinedButton.styleFrom(
+                                foregroundColor: AppColors.lime,
+                                side: const BorderSide(color: AppColors.lime),
+                                shape: const StadiumBorder()),
+                            onPressed: null,
+                            child: const Text('Diimpor ✓',
+                                style: TextStyle(color: AppColors.lime)),
+                          )
+                        : FilledButton(
+                            style: FilledButton.styleFrom(shape: const StadiumBorder()),
+                            onPressed: () => _importWorkout(w),
+                            child: const Text('Impor',
+                                style: TextStyle(fontWeight: FontWeight.w700)),
+                          ),
+                  ]),
                 ),
-              ),
-          ],
-          const SizedBox(height: 16),
-          Card(
-            child: Padding(
+                const SizedBox(height: 10),
+              ],
+            ],
+            const SizedBox(height: 18),
+            Container(
               padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                border: Border.all(color: const Color(0xFF3B4A6B)),
+                borderRadius: BorderRadius.circular(20),
+              ),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   const Row(children: [
                     Icon(Icons.route, color: AppColors.lime),
-                    SizedBox(width: 8),
+                    SizedBox(width: 10),
                     Text('Impor file .FIT (dengan rute)',
-                        style: TextStyle(fontWeight: FontWeight.w700)),
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                   ]),
                   const SizedBox(height: 8),
                   const Text(
-                    'Di Garmin Connect (web): buka aktivitas > ikon gerigi > Export Original. Ekstrak .zip, lalu pilih file .fit di sini.',
-                    style: TextStyle(color: AppColors.muted, fontSize: 13),
+                    'Garmin Connect web › aktivitas › ikon gerigi › Export Original. Ekstrak .zip, lalu pilih file .fit.',
+                    style: TextStyle(fontSize: 13, height: 1.5, color: AppColors.muted),
                   ),
                   const SizedBox(height: 12),
-                  FilledButton.icon(
-                    onPressed: _busy ? null : _importFit,
-                    icon: const Icon(Icons.upload_file),
-                    label: const Text('Pilih file .FIT'),
+                  SizedBox(
+                    height: 48,
+                    child: FilledButton(
+                      style: FilledButton.styleFrom(
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14))),
+                      onPressed: _busy ? null : _importFit,
+                      child: const Text('Pilih file .FIT',
+                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
+                    ),
                   ),
                 ],
               ),
             ),
-          ),
-          if (_busy)
-            const Padding(
-              padding: EdgeInsets.all(24),
-              child: Center(child: CircularProgressIndicator()),
+            if (_busy)
+              const Padding(
+                padding: EdgeInsets.all(24),
+                child: Center(child: CircularProgressIndicator()),
+              ),
+            const SizedBox(height: 24),
+            const Center(
+              child: Text('$appName · $appCredit',
+                  style: TextStyle(fontSize: 12, color: AppColors.muted)),
             ),
-        ],
+          ],
+        ),
       ),
     );
   }

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Ikon notifikasi (putih, satu warna) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:pathData="M54,30C54,48 36,50 38,64S62,76 52,92"
+        android:strokeColor="#FFFFFFFF" android:strokeWidth="13" android:strokeLineCap="round" android:fillColor="#00000000" />
+    <path android:pathData="M22,28H86"
+        android:strokeColor="#FFFFFFFF" android:strokeWidth="14" android:strokeLineCap="round" android:fillColor="#00000000" />
+</vector>

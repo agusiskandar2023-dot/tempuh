@@ -17,9 +17,49 @@ class TrackScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final t = context.watch<TrackingService>();
-    return t.isActive ? const _LiveView() : const _SetupView();
+    final active = context.select<TrackingService, bool>((t) => t.isActive);
+    return active ? const _LiveView() : const _SetupView();
   }
+}
+
+/// Chip gelap di atas peta.
+class _MapChip extends StatelessWidget {
+  final Widget leading;
+  final String text;
+  const _MapChip({required this.leading, required this.text});
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: AppColors.navy.withValues(alpha: 0.88),
+          borderRadius: BorderRadius.circular(99),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          leading,
+          const SizedBox(width: 8),
+          Text(text, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+        ]),
+      );
+}
+
+/// Panel bawah membulat yang sedikit menutupi peta.
+class _Sheet extends StatelessWidget {
+  final Widget child;
+  const _Sheet({required this.child});
+
+  @override
+  Widget build(BuildContext context) => Transform.translate(
+        offset: const Offset(0, -16),
+        child: Container(
+          decoration: const BoxDecoration(
+            color: AppColors.charcoal,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+          child: child,
+        ),
+      );
 }
 
 class _SetupView extends StatefulWidget {
@@ -71,27 +111,39 @@ class _SetupViewState extends State<_SetupView> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Rekam Aktivitas')),
       body: Column(
         children: [
           Expanded(
-            child: RouteMap(route: const [], current: _here, follow: true),
+            child: Stack(children: [
+              Positioned.fill(
+                  child: RouteMap(route: const [], current: _here, follow: true)),
+              const Positioned(
+                top: 16,
+                left: 16,
+                child: SafeArea(
+                  child: _MapChip(
+                    leading: Icon(Icons.gps_fixed, size: 16, color: AppColors.lime),
+                    text: 'Pilih olahraga lalu tekan START',
+                  ),
+                ),
+              ),
+            ]),
           ),
-          Container(
-            color: AppColors.charcoal,
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
+          _Sheet(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (!_batteryOk)
-                  Card(
+                if (!_batteryOk) ...[
+                  Material(
                     color: const Color(0xFF3B2F0B),
+                    borderRadius: BorderRadius.circular(16),
                     child: ListTile(
-                      leading: const Icon(Icons.battery_alert,
-                          color: Colors.amber),
-                      title: const Text('Izinkan berjalan di latar belakang'),
+                      leading: const Icon(Icons.battery_alert, color: AppColors.amber),
+                      title: const Text('Izinkan berjalan di latar belakang',
+                          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
                       subtitle: const Text(
-                          'Agar rekaman tidak dihentikan penghemat baterai saat HP sleep.'),
+                          'Agar rekaman tidak dihentikan penghemat baterai saat HP sleep.',
+                          style: TextStyle(fontSize: 12)),
                       onTap: () async {
                         final ok = await context
                             .read<TrackingService>()
@@ -100,32 +152,34 @@ class _SetupViewState extends State<_SetupView> {
                       },
                     ),
                   ),
-                if (!_batteryOk) const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  alignment: WrapAlignment.center,
+                  const SizedBox(height: 14),
+                ],
+                GridView.count(
+                  crossAxisCount: 4,
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  mainAxisSpacing: 8,
+                  crossAxisSpacing: 8,
+                  childAspectRatio: 0.95,
                   children: [
-                    for (final s in SportType.values)
-                      ChoiceChip(
-                        avatar: Icon(s.icon, size: 18),
-                        label: Text(s.label),
-                        selected: _sport == s,
-                        onSelected: (_) => setState(() => _sport = s),
-                      ),
+                    for (final s in SportType.values) _sportTile(s),
                   ],
                 ),
                 const SizedBox(height: 16),
                 SizedBox(
-                  height: 60,
+                  height: 64,
                   child: FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(18)),
+                    ),
                     onPressed: _starting ? null : _start,
                     icon: _starting
                         ? const SizedBox(
-                            width: 20,
-                            height: 20,
+                            width: 22,
+                            height: 22,
                             child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.play_arrow, size: 30),
+                        : const Icon(Icons.play_arrow_rounded, size: 30),
                     label: Text('START ${_sport.label.toUpperCase()}',
                         style: const TextStyle(
                             fontSize: 18, fontWeight: FontWeight.w800)),
@@ -138,6 +192,31 @@ class _SetupViewState extends State<_SetupView> {
       ),
     );
   }
+
+  Widget _sportTile(SportType s) {
+    final on = s == _sport;
+    return Material(
+      color: on ? AppColors.lime : AppColors.navy,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () => setState(() => _sport = s),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(s.icon, color: on ? AppColors.navy : AppColors.lime, size: 28),
+            const SizedBox(height: 6),
+            Text(s.label,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: on ? AppColors.navy : AppColors.soft)),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _LiveView extends StatelessWidget {
@@ -145,44 +224,47 @@ class _LiveView extends StatelessWidget {
 
   Future<void> _finish(BuildContext context) async {
     final t = context.read<TrackingService>();
-    final ok = await showDialog<bool>(
+    final choice = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.charcoal,
         title: const Text('Selesaikan aktivitas?'),
         content: Text(
             'Jarak ${formatKm(t.distanceMeters)} km, waktu aktif ${formatDuration(t.movingSeconds)}.'),
         actions: [
           TextButton(
-            onPressed: () async {
-              Navigator.pop(ctx, false);
-              final del = await showDialog<bool>(
-                context: context,
-                builder: (c2) => AlertDialog(
-                  title: const Text('Buang aktivitas ini?'),
-                  actions: [
-                    TextButton(
-                        onPressed: () => Navigator.pop(c2, false),
-                        child: const Text('Batal')),
-                    TextButton(
-                        onPressed: () => Navigator.pop(c2, true),
-                        child: const Text('Buang')),
-                  ],
-                ),
-              );
-              if (del == true) await t.discard();
-            },
-            child: const Text('Buang'),
-          ),
+              onPressed: () => Navigator.pop(ctx, 'discard'),
+              child: const Text('Buang', style: TextStyle(color: AppColors.danger))),
           TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
+              onPressed: () => Navigator.pop(ctx, null),
               child: const Text('Batal')),
           FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
+              onPressed: () => Navigator.pop(ctx, 'save'),
               child: const Text('Simpan')),
         ],
       ),
     );
-    if (ok != true) return;
+    if (!context.mounted || choice == null) return;
+    if (choice == 'discard') {
+      final sure = await showDialog<bool>(
+        context: context,
+        builder: (c2) => AlertDialog(
+          backgroundColor: AppColors.charcoal,
+          title: const Text('Buang aktivitas ini?'),
+          content: const Text('Rute dan metrik sesi ini akan dihapus.'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(c2, false),
+                child: const Text('Batal')),
+            TextButton(
+                onPressed: () => Navigator.pop(c2, true),
+                child: const Text('Buang', style: TextStyle(color: AppColors.danger))),
+          ],
+        ),
+      );
+      if (sure == true) await t.discard();
+      return;
+    }
     final id = await t.finish();
     if (!context.mounted) return;
     await context.read<ActivityStore>().reload();
@@ -203,108 +285,143 @@ class _LiveView extends StatelessWidget {
     final paused = t.state == TrackingState.paused;
     final speed = calc.currentSpeedMps();
     return Scaffold(
-      appBar: AppBar(
-        title: Row(children: [
-          Icon(a.sport.icon, color: AppColors.lime),
-          const SizedBox(width: 8),
-          Text(a.sport.label),
-        ]),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 12),
-            child: Center(
-              child: Text(t.gpsQuality,
-                  style: const TextStyle(fontSize: 12, color: AppColors.muted)),
-            ),
-          ),
-        ],
-      ),
       body: Column(
         children: [
           Expanded(
-            child: RouteMap(
-              route: route,
-              current: fix == null ? null : LatLng(fix.latitude, fix.longitude),
-              follow: true,
-            ),
-          ),
-          Container(
-            color: AppColors.charcoal,
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-            child: Column(
-              children: [
-                if (paused)
-                  const Padding(
-                    padding: EdgeInsets.only(bottom: 8),
-                    child: Text('DIJEDA',
-                        style: TextStyle(
-                            color: Colors.amber,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 2)),
+            child: Stack(children: [
+              Positioned.fill(
+                child: RouteMap(
+                  route: route,
+                  current: fix == null ? null : LatLng(fix.latitude, fix.longitude),
+                  follow: true,
+                ),
+              ),
+              Positioned(
+                top: 0,
+                left: 16,
+                right: 16,
+                child: SafeArea(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 16),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        _MapChip(
+                          leading: const Icon(Icons.satellite_alt,
+                              size: 16, color: AppColors.lime),
+                          text: t.gpsQuality,
+                        ),
+                        _MapChip(
+                          leading: Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: paused ? AppColors.amber : AppColors.danger,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          text: paused ? 'Dijeda' : 'Merekam',
+                        ),
+                      ],
+                    ),
                   ),
+                ),
+              ),
+            ]),
+          ),
+          _Sheet(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(children: [
+                  Icon(a.sport.icon, color: AppColors.lime, size: 20),
+                  const SizedBox(width: 8),
+                  Text(a.sport.label,
+                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                  const Spacer(),
+                  const Text('Tetap merekam saat layar mati',
+                      style: TextStyle(fontSize: 12, color: AppColors.muted)),
+                ]),
                 if (t.error != null)
                   Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.only(top: 8),
                     child: Text(t.error!,
-                        style: const TextStyle(color: Colors.redAccent, fontSize: 12)),
+                        style: const TextStyle(color: AppColors.danger, fontSize: 12)),
                   ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    StatTile('Jarak', formatKm(t.distanceMeters),
-                        unit: 'km', large: true),
-                    StatTile('Waktu aktif', formatDuration(t.movingSeconds),
-                        large: true),
-                  ],
-                ),
                 const SizedBox(height: 12),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    a.sport.showsSpeed
-                        ? StatTile('Kecepatan',
-                            speed == null ? '--' : (speed * 3.6).toStringAsFixed(1),
-                            unit: 'km/j')
-                        : StatTile('Pace', formatPace(calc.currentPaceSecondsPerKm()),
-                            unit: '/km'),
-                    StatTile('Total', formatDuration(t.elapsedSeconds)),
-                    StatTile('Elevasi', calc.elevationGainMeters.round().toString(),
-                        unit: 'm'),
+                    StatTile.large('Jarak',
+                        formatKm(t.distanceMeters).replaceAll('.', ','),
+                        unit: 'km'),
+                    StatTile.large('Waktu aktif', formatDuration(t.movingSeconds),
+                        align: CrossAxisAlignment.end),
                   ],
+                ),
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                      color: AppColors.navy, borderRadius: BorderRadius.circular(16)),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: a.sport.showsSpeed
+                            ? StatTile('Kecepatan',
+                                speed == null
+                                    ? '--'
+                                    : (speed * 3.6).toStringAsFixed(1).replaceAll('.', ','),
+                                unit: 'km/j',
+                                size: 22)
+                            : StatTile('Pace', formatPace(calc.currentPaceSecondsPerKm()),
+                                unit: '/km', size: 22),
+                      ),
+                      Expanded(
+                          child: StatTile('Total', formatDuration(t.elapsedSeconds),
+                              size: 22)),
+                      Expanded(
+                          child: StatTile('Elevasi',
+                              calc.elevationGainMeters.round().toString(),
+                              unit: 'm', size: 22)),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 18),
                 Row(
                   children: [
                     Expanded(
                       child: SizedBox(
-                        height: 60,
-                        child: paused
-                            ? FilledButton.icon(
-                                onPressed: t.resume,
-                                icon: const Icon(Icons.play_arrow, size: 28),
-                                label: const Text('LANJUT',
-                                    style: TextStyle(
-                                        fontSize: 17, fontWeight: FontWeight.w800)),
-                              )
-                            : FilledButton.tonalIcon(
-                                onPressed: t.pause,
-                                icon: const Icon(Icons.pause, size: 28),
-                                label: const Text('PAUSE',
-                                    style: TextStyle(
-                                        fontSize: 17, fontWeight: FontWeight.w800)),
-                              ),
+                        height: 64,
+                        child: FilledButton.icon(
+                          style: FilledButton.styleFrom(
+                            backgroundColor: paused ? AppColors.lime : AppColors.raised,
+                            foregroundColor: paused ? AppColors.navy : AppColors.text,
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(18)),
+                          ),
+                          onPressed: paused ? t.resume : t.pause,
+                          icon: Icon(paused ? Icons.play_arrow_rounded : Icons.pause_rounded,
+                              size: 28),
+                          label: Text(paused ? 'LANJUT' : 'PAUSE',
+                              style: const TextStyle(
+                                  fontSize: 17, fontWeight: FontWeight.w800)),
+                        ),
                       ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: SizedBox(
-                        height: 60,
+                        height: 64,
                         child: FilledButton.icon(
                           style: FilledButton.styleFrom(
-                              backgroundColor: Colors.redAccent,
-                              foregroundColor: Colors.white),
+                            backgroundColor: AppColors.danger,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(18)),
+                          ),
                           onPressed: () => _finish(context),
-                          icon: const Icon(Icons.stop, size: 28),
+                          icon: const Icon(Icons.stop_rounded, size: 28),
                           label: const Text('SELESAI',
                               style: TextStyle(
                                   fontSize: 17, fontWeight: FontWeight.w800)),

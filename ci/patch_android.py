@@ -79,8 +79,10 @@ def patch_manifest():
         else:
             xml = xml.replace("</manifest>", QUERIES + "</manifest>", 1)
 
-    if 'android:label="movetrack_ai"' in xml:
-        xml = xml.replace('android:label="movetrack_ai"', 'android:label="MoveTrack AI"')
+    xml = re.sub(r'android:label="[^"]*"', 'android:label="Tempuh"', xml, count=1)
+    if "android:roundIcon" not in xml:
+        xml = xml.replace('android:icon="@mipmap/ic_launcher"',
+                          'android:icon="@mipmap/ic_launcher"\n        android:roundIcon="@mipmap/ic_launcher_round"', 1)
 
     if "ACTION_SHOW_PERMISSIONS_RATIONALE\" />\n            </intent-filter>" not in xml:
         # sisipkan intent-filter rationale ke dalam <activity ... .MainActivity>
@@ -95,6 +97,18 @@ def patch_manifest():
 
     with open(MANIFEST, "w", encoding="utf-8") as f:
         f.write(xml)
+
+
+def copy_resources():
+    """Ikon launcher adaptif + ikon notifikasi Tempuh (ci/android_res)."""
+    import shutil, os
+    src = "ci/android_res"
+    dst = "android/app/src/main/res"
+    for root, _, files in os.walk(src):
+        rel = os.path.relpath(root, src)
+        os.makedirs(os.path.join(dst, rel), exist_ok=True)
+        for f in files:
+            shutil.copyfile(os.path.join(root, f), os.path.join(dst, rel, f))
 
 
 def patch_main_activity():
@@ -131,6 +145,7 @@ def patch_gradle():
 
 if __name__ == "__main__":
     patch_manifest()
+    copy_resources()
     patch_main_activity()
     patch_gradle()
     print("Android patched.")

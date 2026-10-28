@@ -1,15 +1,18 @@
-# MoveTrack AI
+# Tempuh
 
-Aplikasi tracker jalan kaki, jogging, lari, dan sepeda (Flutter, Android).
+*Setiap kilometer yang kamu tempuh.* Aplikasi tracker lari, jalan kaki, jogging, dan sepeda (Flutter, Android).
+
+Created by KangAIs.
 
 ## Unduh APK
 
-Buka **Releases** di repo ini dari HP Android, unduh `MoveTrackAI.apk` versi terbaru, lalu pasang
+Buka **Releases** di repo ini dari HP Android, unduh `Tempuh.apk` versi terbaru, lalu pasang
 (izinkan "Instal aplikasi tidak dikenal" untuk browser bila diminta). Setiap push ke `main` membuat
 rilis baru secara otomatis lewat GitHub Actions.
 
-## Fitur versi 0.1
+## Fitur versi 0.2
 
+- Nama, ikon launcher adaptif (T-Rute), ikon notifikasi, dan tampilan sesuai mockup desain.
 - Rekam GPS untuk 4 jenis olahraga: start, pause, lanjut, selesai.
 - **Tetap merekam saat layar mati / HP sleep**: foreground service lokasi + notifikasi tetap + wake lock.
   Disarankan menekan kartu "Izinkan berjalan di latar belakang" di layar Rekam agar penghemat baterai

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:provider/provider.dart';
 
@@ -16,12 +17,14 @@ import 'services/tracking_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Font diambil sekali lalu disimpan di HP; tanpa internet memakai font bawaan.
+  GoogleFonts.config.allowRuntimeFetching = true;
   await initializeDateFormatting('id_ID');
-  runApp(const MoveTrackApp());
+  runApp(const TempuhApp());
 }
 
-class MoveTrackApp extends StatelessWidget {
-  const MoveTrackApp({super.key});
+class TempuhApp extends StatelessWidget {
+  const TempuhApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -32,7 +35,7 @@ class MoveTrackApp extends StatelessWidget {
         Provider(create: (_) => HealthService()),
       ],
       child: MaterialApp(
-        title: 'MoveTrack AI',
+        title: appName,
         debugShowCheckedModeBanner: false,
         theme: buildTheme(),
         home: const AppShell(),
@@ -43,6 +46,9 @@ class MoveTrackApp extends StatelessWidget {
 
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
+
+  static AppShellState? of(BuildContext context) =>
+      context.findAncestorStateOfType<AppShellState>();
 
   @override
   State<AppShell> createState() => AppShellState();
@@ -69,6 +75,7 @@ class AppShellState extends State<AppShell> {
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.charcoal,
         title: const Text('Sesi belum selesai'),
         content: Text(
             'Ditemukan sesi ${a.sport.label} yang terputus. Data yang sudah terekam aman. Lanjutkan atau simpan sekarang?'),
@@ -121,26 +128,74 @@ class AppShellState extends State<AppShell> {
           const GarminScreen(),
         ],
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: goTo,
-        destinations: [
-          const NavigationDestination(
-              icon: Icon(Icons.home_outlined),
-              selectedIcon: Icon(Icons.home),
-              label: 'Beranda'),
-          NavigationDestination(
-              icon: Icon(recording ? Icons.fiber_manual_record : Icons.play_circle_outline,
-                  color: recording ? Colors.redAccent : null),
-              selectedIcon: const Icon(Icons.play_circle),
-              label: recording ? 'Merekam' : 'Rekam'),
-          const NavigationDestination(
-              icon: Icon(Icons.history), label: 'Riwayat'),
-          const NavigationDestination(
-              icon: Icon(Icons.watch_outlined),
-              selectedIcon: Icon(Icons.watch),
-              label: 'Garmin'),
-        ],
+      bottomNavigationBar: _BottomNav(
+        index: _index,
+        recording: recording,
+        onTap: goTo,
+      ),
+    );
+  }
+}
+
+class _BottomNav extends StatelessWidget {
+  final int index;
+  final bool recording;
+  final ValueChanged<int> onTap;
+  const _BottomNav(
+      {required this.index, required this.recording, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final items = [
+      (Icons.home_outlined, Icons.home_rounded, 'Beranda'),
+      (
+        recording ? Icons.fiber_manual_record : Icons.play_circle_outline,
+        Icons.play_circle_rounded,
+        recording ? 'Merekam' : 'Rekam'
+      ),
+      (Icons.history_rounded, Icons.history_rounded, 'Riwayat'),
+      (Icons.watch_outlined, Icons.watch_rounded, 'Garmin'),
+    ];
+    return Container(
+      color: AppColors.charcoal,
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 72,
+          child: Row(
+            children: [
+              for (var i = 0; i < items.length; i++)
+                Expanded(
+                  child: InkWell(
+                    onTap: () => onTap(i),
+                    child: Semantics(
+                      selected: i == index,
+                      button: true,
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            i == index ? items[i].$2 : items[i].$1,
+                            color: i == 1 && recording && i != index
+                                ? AppColors.danger
+                                : (i == index ? AppColors.lime : AppColors.muted),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(items[i].$3,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight:
+                                    i == index ? FontWeight.w700 : FontWeight.w600,
+                                color: i == index ? AppColors.lime : AppColors.muted,
+                              )),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }

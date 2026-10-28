@@ -37,11 +37,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp build/app/outputs/flutter-apk/app-release.apk MoveTrackAI.apk
-          TAG="v0.1.${{ github.run_number }}"
-          gh release create "$TAG" MoveTrackAI.apk \
-            --title "MoveTrack AI $TAG" \
-            --notes "Build otomatis dari commit ${{ github.sha }}. Unduh MoveTrackAI.apk lalu pasang di HP Android." \
+          cp build/app/outputs/flutter-apk/app-release.apk Tempuh.apk
+          TAG="v0.2.${{ github.run_number }}"
+          gh release create "$TAG" Tempuh.apk \
+            --title "Tempuh $TAG" \
+            --notes "Build otomatis dari commit ${{ github.sha }}. Unduh Tempuh.apk lalu pasang di HP Android." \
             --latest
 
       - name: Save build log to ci-logs branch

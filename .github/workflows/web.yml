@@ -19,11 +19,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Publish web/ to gh-pages
-        run: |
-          cd web
-          touch .nojekyll
-          git init -q
-          git checkout -q -b gh-pages
-          git add -A
-          git -c user.name=ci -c user.email=ci@users.noreply.github.com commit -qm "Deploy web ${{ github.sha }}"
-          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./web
+          publish_branch: gh-pages
+          force_orphan: true
+          enable_jekyll: false

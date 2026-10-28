@@ -8,7 +8,9 @@ import '../core/theme.dart';
 import '../data/activity_store.dart';
 import '../domain/metrics.dart';
 import '../models/activity.dart';
+import '../services/cloud_service.dart';
 import '../widgets/route_thumbnail.dart';
+import 'account_screen.dart';
 import 'activity_detail_screen.dart';
 
 /// Target jarak mingguan (km). Bisa dibuat bisa diubah di versi berikutnya.
@@ -50,6 +52,8 @@ class HomeScreen extends StatelessWidget {
                         fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -0.4)),
                 const Spacer(),
                 Text(today, style: const TextStyle(fontSize: 13, color: AppColors.muted)),
+                const SizedBox(width: 4),
+                const _CloudButton(),
               ]),
               const SizedBox(height: 18),
               Text(_greeting(),
@@ -270,6 +274,46 @@ class ActivityCard extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Ikon status sinkron di pojok Beranda; membuka layar Akun & Sinkron.
+class _CloudButton extends StatelessWidget {
+  const _CloudButton();
+
+  @override
+  Widget build(BuildContext context) {
+    final cloud = context.watch<CloudService>();
+    final IconData icon;
+    final Color color;
+    final String tip;
+    if (!cloud.loggedIn) {
+      icon = Icons.cloud_off_outlined;
+      color = AppColors.muted;
+      tip = 'Belum masuk akun';
+    } else if (cloud.syncing) {
+      icon = Icons.cloud_sync_outlined;
+      color = AppColors.lime;
+      tip = 'Menyinkronkan';
+    } else if (cloud.lastError != null) {
+      icon = Icons.cloud_off_outlined;
+      color = AppColors.amber;
+      tip = 'Sinkron bermasalah';
+    } else if (cloud.pending > 0) {
+      icon = Icons.cloud_upload_outlined;
+      color = AppColors.amber;
+      tip = '${cloud.pending} menunggu sinkron';
+    } else {
+      icon = Icons.cloud_done_outlined;
+      color = AppColors.lime;
+      tip = 'Tersinkron';
+    }
+    return IconButton(
+      tooltip: tip,
+      icon: Icon(icon, color: color),
+      onPressed: () => Navigator.of(context)
+          .push(MaterialPageRoute(builder: (_) => const AccountScreen())),
     );
   }
 }

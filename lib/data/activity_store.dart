@@ -11,6 +11,10 @@ class ActivityStore extends ChangeNotifier {
   List<Activity> items = [];
   bool loading = false;
 
+  /// Dipanggil setiap data aktivitas dimuat ulang / berubah; dipakai untuk
+  /// memicu sinkron ke Neon (lihat main.dart).
+  VoidCallback? onChanged;
+
   Future<void> reload() async {
     loading = true;
     notifyListeners();
@@ -20,6 +24,7 @@ class ActivityStore extends ChangeNotifier {
       loading = false;
       notifyListeners();
     }
+    onChanged?.call();
   }
 
   Future<void> delete(String id) async {

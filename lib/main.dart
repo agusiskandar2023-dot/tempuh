@@ -12,6 +12,7 @@ import 'screens/garmin_screen.dart';
 import 'screens/history_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/track_screen.dart';
+import 'services/cloud_service.dart';
 import 'services/health_service.dart';
 import 'services/tracking_service.dart';
 
@@ -31,7 +32,14 @@ class TempuhApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => TrackingService()),
-        ChangeNotifierProvider(create: (_) => ActivityStore()..reload()),
+        ChangeNotifierProvider(create: (_) => CloudService()..init()),
+        ChangeNotifierProvider(create: (ctx) {
+          final cloud = ctx.read<CloudService>();
+          final store = ActivityStore();
+          store.onChanged = cloud.requestSync;
+          cloud.onLocalChanged = store.reload;
+          return store..reload();
+        }),
         Provider(create: (_) => HealthService()),
       ],
       child: MaterialApp(

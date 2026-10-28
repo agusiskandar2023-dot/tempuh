@@ -4,7 +4,10 @@ import 'package:sqflite/sqflite.dart';
 import '../models/activity.dart';
 
 /// Penyimpanan lokal (offline-first). Semua sesi ditulis ke SQLite lebih
-/// dulu; kolom sync_status disiapkan untuk sinkronisasi Supabase nanti.
+/// dulu, lalu disinkronkan ke Neon bila pengguna login.
+///
+/// ATURAN MIGRASI: versi baru hanya boleh MENAMBAH (tabel/kolom/indeks),
+/// tidak pernah menghapus atau membuat ulang tabel, agar data lama aman.
 class AppDatabase {
   AppDatabase._();
   static final AppDatabase instance = AppDatabase._();
@@ -17,8 +20,9 @@ class AppDatabase {
     final dir = await getDatabasesPath();
     return openDatabase(
       p.join(dir, 'movetrack.db'),
-      version: 1,
+      version: _schemaVersion,
       onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
+      onUpgrade: (db, oldVersion, newVersion) => _migrate(db, oldVersion),
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE activities (
@@ -57,8 +61,104 @@ class AppDatabase {
           )''');
         await db.execute(
             'CREATE INDEX idx_activities_started ON activities(started_at)');
+        await _migrate(db, 1);
       },
     );
+  }
+
+  static const _schemaVersion = 2;
+
+  /// Migrasi bertahap dari [from] ke versi terbaru. Hanya menambah.
+  static Future<void> _migrate(Database db, int from) async {
+    if (from < 2) {
+      // v2: sinkronisasi Neon.
+      await db.execute('ALTER TABLE activities ADD COLUMN cloud_id TEXT');
+      await db.execute('ALTER TABLE activities ADD COLUMN synced_at INTEGER');
+      await db.execute(
+          'CREATE TABLE IF NOT EXISTS deleted_remote (cloud_id TEXT PRIMARY KEY, deleted_at INTEGER NOT NULL)');
+    }
+  }
+
+  // ---------------- Sinkronisasi ----------------
+
+  /// Aktivitas selesai yang belum terkirim / berubah sejak sinkron terakhir.
+  Future<List<Map<String, Object?>>> activitiesToPush() async {
+    final d = await db;
+    return d.query('activities',
+        where: 'status = ? AND sync_status != ?',
+        whereArgs: [ActivityStatus.finished.name, 'synced'],
+        orderBy: 'started_at');
+  }
+
+  Future<void> markSynced(String id, String cloudId) async {
+    final d = await db;
+    await d.update(
+        'activities',
+        {
+          'cloud_id': cloudId,
+          'sync_status': 'synced',
+          'synced_at': DateTime.now().millisecondsSinceEpoch,
+        },
+        where: 'id = ?',
+        whereArgs: [id]);
+  }
+
+  Future<Set<String>> knownCloudIds() async {
+    final d = await db;
+    final rows = await d.query('activities',
+        columns: ['id', 'cloud_id'], where: 'status = ?', whereArgs: [ActivityStatus.finished.name]);
+    return {
+      for (final r in rows) ...[
+        if (r['cloud_id'] != null) r['cloud_id'] as String,
+        r['id'] as String,
+      ]
+    };
+  }
+
+  Future<String?> cloudIdOf(String id) async {
+    final d = await db;
+    final rows = await d.query('activities',
+        columns: ['cloud_id'], where: 'id = ?', whereArgs: [id], limit: 1);
+    return rows.isEmpty ? null : rows.first['cloud_id'] as String?;
+  }
+
+  /// Aktivitas dari Neon (misalnya upload .FIT lewat web) disimpan lokal
+  /// sebagai sudah tersinkron.
+  Future<void> insertFromCloud(Activity a, List<TrackPoint> pts) async {
+    final d = await db;
+    await d.transaction((txn) async {
+      final m = a.toMap()
+        ..['cloud_id'] = a.id
+        ..['sync_status'] = 'synced'
+        ..['synced_at'] = DateTime.now().millisecondsSinceEpoch;
+      final updated =
+          await txn.update('activities', m, where: 'id = ?', whereArgs: [a.id]);
+      if (updated == 0) await txn.insert('activities', m);
+      final batch = txn.batch();
+      for (final pt in pts) {
+        batch.insert('activity_points', pt.toMap(a.id),
+            conflictAlgorithm: ConflictAlgorithm.ignore);
+      }
+      await batch.commit(noResult: true);
+    });
+  }
+
+  Future<void> addDeletedRemote(String cloudId) async {
+    final d = await db;
+    await d.insert('deleted_remote',
+        {'cloud_id': cloudId, 'deleted_at': DateTime.now().millisecondsSinceEpoch},
+        conflictAlgorithm: ConflictAlgorithm.ignore);
+  }
+
+  Future<List<String>> pendingRemoteDeletes() async {
+    final d = await db;
+    final rows = await d.query('deleted_remote', columns: ['cloud_id']);
+    return [for (final r in rows) r['cloud_id'] as String];
+  }
+
+  Future<void> clearRemoteDelete(String cloudId) async {
+    final d = await db;
+    await d.delete('deleted_remote', where: 'cloud_id = ?', whereArgs: [cloudId]);
   }
 
   /// Simpan atau perbarui aktivitas.
@@ -132,8 +232,13 @@ class AppDatabase {
     return rows.isNotEmpty;
   }
 
+  /// Menghapus aktivitas lokal. Bila sudah pernah tersinkron, catat agar
+  /// salinan di Neon ikut dihapus pada sinkron berikutnya (kalau tidak,
+  /// aktivitas akan turun lagi dari server).
   Future<void> deleteActivity(String id) async {
     final d = await db;
+    final cloudId = await cloudIdOf(id);
+    if (cloudId != null) await addDeletedRemote(cloudId);
     await d.delete('activities', where: 'id = ?', whereArgs: [id]);
   }
 }

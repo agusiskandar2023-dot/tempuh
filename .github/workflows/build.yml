@@ -38,7 +38,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           cp build/app/outputs/flutter-apk/app-release.apk Tempuh.apk
-          TAG="v0.2.${{ github.run_number }}"
+          TAG="v$(grep -m1 '^version:' pubspec.yaml | sed 's/version: *//; s/+.*//').${{ github.run_number }}"
           gh release create "$TAG" Tempuh.apk \
             --title "Tempuh $TAG" \
             --notes "Build otomatis dari commit ${{ github.sha }}. Unduh Tempuh.apk lalu pasang di HP Android." \

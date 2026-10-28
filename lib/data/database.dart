@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
@@ -9,17 +11,29 @@ import '../models/activity.dart';
 /// ATURAN MIGRASI: versi baru hanya boleh MENAMBAH (tabel/kolom/indeks),
 /// tidak pernah menghapus atau membuat ulang tabel, agar data lama aman.
 class AppDatabase {
-  AppDatabase._();
+  AppDatabase._() : _factory = null, _path = null;
   static final AppDatabase instance = AppDatabase._();
 
+  /// Untuk tes: database di [path] memakai [factory] (misalnya sqflite ffi).
+  AppDatabase.test(DatabaseFactory factory, String path)
+      : _factory = factory,
+        _path = path;
+
+  final DatabaseFactory? _factory;
+  final String? _path;
   Database? _db;
 
   Future<Database> get db async => _db ??= await _open();
 
+  Future<void> close() async {
+    await _db?.close();
+    _db = null;
+  }
+
   Future<Database> _open() async {
-    final dir = await getDatabasesPath();
-    return openDatabase(
-      p.join(dir, 'movetrack.db'),
+    final factory = _factory ?? databaseFactory;
+    final path = _path ?? p.join(await factory.getDatabasesPath(), 'movetrack.db');
+    return factory.openDatabase(path, options: OpenDatabaseOptions(
       version: _schemaVersion,
       onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
       onUpgrade: (db, oldVersion, newVersion) => _migrate(db, oldVersion),
@@ -63,7 +77,7 @@ class AppDatabase {
             'CREATE INDEX idx_activities_started ON activities(started_at)');
         await _migrate(db, 1);
       },
-    );
+    ));
   }
 
   static const _schemaVersion = 2;
@@ -240,5 +254,61 @@ class AppDatabase {
     final cloudId = await cloudIdOf(id);
     if (cloudId != null) await addDeletedRemote(cloudId);
     await d.delete('activities', where: 'id = ?', whereArgs: [id]);
+  }
+
+  // ---------------- Backup ----------------
+
+  /// Semua aktivitas selesai + rutenya sebagai JSON (file backup).
+  Future<String> exportJson() async {
+    final d = await db;
+    final acts = await d.query('activities',
+        where: 'status = ?', whereArgs: [ActivityStatus.finished.name], orderBy: 'started_at');
+    final out = <Map<String, Object?>>[];
+    for (final a in acts) {
+      final pts = await d.query('activity_points',
+          where: 'activity_id = ?', whereArgs: [a['id']], orderBy: 'sequence_no');
+      out.add({...a, 'points': pts});
+    }
+    return jsonEncode({
+      'app': 'tempuh',
+      'format': 1,
+      'schema': _schemaVersion,
+      'exported_at': DateTime.now().toIso8601String(),
+      'activities': out,
+    });
+  }
+
+  /// Memulihkan backup. Hanya MENAMBAH aktivitas yang belum ada; data yang
+  /// sudah ada di HP tidak ditimpa. Mengembalikan jumlah aktivitas baru.
+  Future<int> importJson(String json) async {
+    final data = jsonDecode(json);
+    if (data is! Map || data['app'] != 'tempuh' || data['activities'] is! List) {
+      throw const FormatException('Bukan file backup Tempuh.');
+    }
+    final d = await db;
+    final cols = (await d.rawQuery('PRAGMA table_info(activities)'))
+        .map((r) => r['name'] as String)
+        .toSet();
+    var added = 0;
+    await d.transaction((txn) async {
+      for (final raw in data['activities'] as List) {
+        final a = Map<String, Object?>.from(raw as Map);
+        final pts = (a.remove('points') as List?) ?? const [];
+        final exists = await txn.query('activities',
+            columns: ['id'], where: 'id = ?', whereArgs: [a['id']], limit: 1);
+        if (exists.isNotEmpty) continue;
+        a.removeWhere((k, _) => !cols.contains(k));
+        if (a['cloud_id'] == null) a['sync_status'] = 'pending';
+        await txn.insert('activities', a);
+        final batch = txn.batch();
+        for (final pt in pts) {
+          batch.insert('activity_points', Map<String, Object?>.from(pt as Map),
+              conflictAlgorithm: ConflictAlgorithm.ignore);
+        }
+        await batch.commit(noResult: true);
+        added++;
+      }
+    });
+    return added;
   }
 }

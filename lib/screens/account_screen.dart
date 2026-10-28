@@ -1,9 +1,15 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../core/theme.dart';
+import '../data/activity_store.dart';
+import '../data/database.dart';
 import '../services/cloud_service.dart';
 
 /// Akun Neon + status sinkron. Akun yang sama dipakai di web Tempuh.
@@ -21,6 +27,8 @@ class AccountScreen extends StatelessWidget {
           children: [
             if (cloud.loggedIn) _SyncPanel(cloud: cloud) else const _LoginForm(),
             const SizedBox(height: 24),
+            const _BackupCard(),
+            const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -329,6 +337,104 @@ class _LoginFormState extends State<_LoginForm> {
             }),
             child: Text(_register ? 'Sudah punya akun? Masuk' : 'Belum punya akun? Daftar'),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Backup semua aktivitas + rute ke file JSON, dan pulihkan dari file itu.
+/// Pemulihan hanya menambah aktivitas yang belum ada; tidak menimpa data.
+class _BackupCard extends StatefulWidget {
+  const _BackupCard();
+
+  @override
+  State<_BackupCard> createState() => _BackupCardState();
+}
+
+class _BackupCardState extends State<_BackupCard> {
+  bool _busy = false;
+
+  Future<void> _backup() async {
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _busy = true);
+    try {
+      final json = await AppDatabase.instance.exportJson();
+      final name =
+          'tempuh-backup-${DateFormat('yyyyMMdd-HHmm').format(DateTime.now())}.json';
+      final saved = await FilePicker.platform.saveFile(
+        dialogTitle: 'Simpan backup Tempuh',
+        fileName: name,
+        bytes: Uint8List.fromList(utf8.encode(json)),
+      );
+      messenger.showSnackBar(SnackBar(
+          content: Text(saved == null ? 'Backup dibatalkan.' : 'Backup tersimpan: $name')));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Backup gagal: $e')));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _restore() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final store = context.read<ActivityStore>();
+    final res = await FilePicker.platform.pickFiles(type: FileType.any, withData: true);
+    final bytes = res?.files.single.bytes;
+    if (bytes == null) return;
+    setState(() => _busy = true);
+    try {
+      final added = await AppDatabase.instance.importJson(utf8.decode(bytes));
+      await store.reload();
+      messenger.showSnackBar(SnackBar(
+          content: Text(added == 0
+              ? 'Semua aktivitas di backup sudah ada di HP.'
+              : '$added aktivitas dipulihkan.')));
+    } on FormatException catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text(e.message)));
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('Gagal memulihkan: $e')));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration:
+          BoxDecoration(color: AppColors.charcoal, borderRadius: BorderRadius.circular(18)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Row(children: [
+            Icon(Icons.save_alt, color: AppColors.lime),
+            SizedBox(width: 10),
+            Text('Backup data', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+          ]),
+          const SizedBox(height: 6),
+          const Text(
+              'Simpan salinan semua aktivitas dan rute ke file, misalnya sebelum ganti HP. Memulihkan hanya menambah aktivitas yang belum ada.',
+              style: TextStyle(fontSize: 13, color: AppColors.muted, height: 1.5)),
+          const SizedBox(height: 12),
+          Row(children: [
+            Expanded(
+              child: FilledButton.tonalIcon(
+                onPressed: _busy ? null : _backup,
+                icon: const Icon(Icons.download),
+                label: const Text('Backup ke file'),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: _busy ? null : _restore,
+                icon: const Icon(Icons.upload),
+                label: const Text('Pulihkan'),
+              ),
+            ),
+          ]),
         ],
       ),
     );

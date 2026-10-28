@@ -10,6 +10,7 @@ import '../models/activity.dart';
 import '../services/health_service.dart';
 import '../widgets/route_map.dart';
 import '../widgets/stat_tile.dart';
+import 'fullscreen_map_screen.dart';
 import 'home_screen.dart';
 
 class ActivityDetailScreen extends StatefulWidget {
@@ -142,7 +143,24 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
           SizedBox(
             height: 240,
             child: route.length >= 2
-                ? RouteMap(route: route)
+                ? Stack(children: [
+                    Positioned.fill(child: RouteMap(route: route)),
+                    Positioned(
+                      top: 10,
+                      right: 10,
+                      child: IconButton.filled(
+                        tooltip: 'Peta layar penuh',
+                        style: IconButton.styleFrom(
+                            backgroundColor: AppColors.navy,
+                            foregroundColor: AppColors.lime,
+                            fixedSize: const Size(48, 48)),
+                        onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+                            builder: (_) =>
+                                FullscreenMapScreen(activity: a, route: route))),
+                        icon: const Icon(Icons.fullscreen),
+                      ),
+                    ),
+                  ])
                 : Container(
                     color: AppColors.charcoal,
                     alignment: Alignment.center,

@@ -4,6 +4,10 @@
 
 Created by KangAIs.
 
+## Web
+
+Dashboard, riwayat, dan upload file .FIT Garmin: **https://agusiskandar2023-dot.github.io/tempuh/**
+
 ## Unduh APK
 
 Buka **Releases** di repo ini dari HP Android, unduh `Tempuh.apk` versi terbaru, lalu pasang

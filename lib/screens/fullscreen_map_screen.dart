@@ -20,7 +20,7 @@ class FullscreenMapScreen extends StatelessWidget {
     return Scaffold(
       body: Stack(
         children: [
-          Positioned.fill(child: RouteMap(route: route)),
+          Positioned.fill(child: RouteMap(route: route, controlsBottom: 140)),
           Positioned(
             top: 0,
             left: 12,

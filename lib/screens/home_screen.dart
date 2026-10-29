@@ -191,6 +191,8 @@ class HomeScreen extends StatelessWidget {
 }
 
 String activityTitle(Activity a) {
+  final custom = a.title?.trim();
+  if (custom != null && custom.isNotEmpty) return custom;
   final h = a.startedAt.hour;
   final part = h < 11 ? 'pagi' : (h < 15 ? 'siang' : (h < 19 ? 'sore' : 'malam'));
   return '${a.sport.label} $part';
@@ -240,7 +242,7 @@ class ActivityCard extends StatelessWidget {
                     Row(children: [
                       Flexible(
                         child: Text(
-                            '${showRoute ? activityTitle(a) : a.sport.label} · ${formatKm(a.distanceMeters).replaceAll('.', ',')} km',
+                            '${activityTitle(a)} · ${formatKm(a.distanceMeters).replaceAll('.', ',')} km',
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
                                 fontSize: 16, fontWeight: FontWeight.w700)),

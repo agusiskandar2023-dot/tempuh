@@ -382,13 +382,18 @@ class CloudService extends ChangeNotifier {
       final known = await _db.knownCloudIds();
       final skip = (await _db.pendingRemoteDeletes()).toSet();
       final remote = await _api(
-              '/activities?select=id,sport_type,started_at,finished_at,elapsed_seconds,moving_seconds,paused_seconds,distance_meters,elevation_gain_meters,calories_estimated,avg_heart_rate,max_heart_rate,source,source_device&status=eq.completed&order=started_at.desc')
+              '/activities?select=id,sport_type,started_at,finished_at,elapsed_seconds,moving_seconds,paused_seconds,distance_meters,elevation_gain_meters,calories_estimated,avg_heart_rate,max_heart_rate,source,source_device,title&status=eq.completed&order=started_at.desc')
           as List? ??
           const [];
       for (final r in remote) {
         final m = r as Map<String, dynamic>;
         final id = m['id'] as String;
-        if (known.contains(id) || skip.contains(id)) continue;
+        if (skip.contains(id)) continue;
+        if (known.contains(id)) {
+          // Nama yang diubah di web ikut turun ke HP.
+          if (await _db.applyRemoteTitle(id, m['title'] as String?)) pulled++;
+          continue;
+        }
         await _pullActivity(m);
         pulled++;
       }
@@ -444,6 +449,7 @@ class CloudService extends ChangeNotifier {
           'max_heart_rate': _hr(a.maxHeartRate),
           'source': a.source,
           'source_device': a.sourceDevice,
+          'title': (a.title?.trim().isEmpty ?? true) ? null : a.title!.trim(),
         });
     final pts = await _db.points(a.id);
     final src = a.source == ActivitySource.fitFile ? 'fit' : 'gps';
@@ -513,6 +519,7 @@ class CloudService extends ChangeNotifier {
       caloriesEstimated: (m['calories_estimated'] as num?)?.toInt(),
       source: (m['source'] as String?) ?? ActivitySource.phone,
       sourceDevice: m['source_device'] as String?,
+      title: m['title'] as String?,
     );
     await _db.insertFromCloud(a, pts);
   }

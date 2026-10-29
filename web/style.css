@@ -132,3 +132,12 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 8px 
 .status.err { color: #fca5a5; }
 .status.wait { color: var(--amber); }
 .toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 16px 0; }
+
+/* ---------- Ubah nama ---------- */
+.title-row { display: flex; align-items: center; gap: 6px; }
+.icon-btn { width: 40px; height: 40px; border-radius: 10px; border: none; background: transparent; color: var(--muted); display: grid; place-items: center; cursor: pointer; flex-shrink: 0; }
+.icon-btn:hover { color: var(--lime); background: var(--charcoal); }
+.rename-form { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.rename-form input { flex: 1 1 220px; min-height: 44px; background: var(--navy); border: 1px solid var(--line); border-radius: 12px; color: var(--text); padding: 0 12px; }
+.rename-form input:focus { outline: 2px solid var(--lime); border-color: transparent; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

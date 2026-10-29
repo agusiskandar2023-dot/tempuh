@@ -80,7 +80,7 @@ class AppDatabase {
     ));
   }
 
-  static const _schemaVersion = 2;
+  static const _schemaVersion = 3;
 
   /// Migrasi bertahap dari [from] ke versi terbaru. Hanya menambah.
   static Future<void> _migrate(Database db, int from) async {
@@ -90,6 +90,10 @@ class AppDatabase {
       await db.execute('ALTER TABLE activities ADD COLUMN synced_at INTEGER');
       await db.execute(
           'CREATE TABLE IF NOT EXISTS deleted_remote (cloud_id TEXT PRIMARY KEY, deleted_at INTEGER NOT NULL)');
+    }
+    if (from < 3) {
+      // v3: nama aktivitas yang bisa diedit.
+      await db.execute('ALTER TABLE activities ADD COLUMN title TEXT');
     }
   }
 
@@ -155,6 +159,17 @@ class AppDatabase {
       }
       await batch.commit(noResult: true);
     });
+  }
+
+  /// Menerapkan nama dari server ke aktivitas lokal yang sudah tersinkron
+  /// (tidak menimpa perubahan lokal yang belum terkirim). true bila berubah.
+  Future<bool> applyRemoteTitle(String cloudId, String? title) async {
+    final d = await db;
+    final n = await d.rawUpdate(
+        "UPDATE activities SET title = ? WHERE (cloud_id = ? OR id = ?) "
+        "AND sync_status = 'synced' AND IFNULL(title, '') != IFNULL(?, '')",
+        [title, cloudId, cloudId, title]);
+    return n > 0;
   }
 
   Future<void> addDeletedRemote(String cloudId) async {

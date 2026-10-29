@@ -125,6 +125,9 @@ class Activity {
   final String source;
   final String? sourceDevice;
 
+  /// Nama yang diberi pengguna. null = nama otomatis ("Lari pagi").
+  final String? title;
+
   /// Waktu pause terakhir dimulai (untuk pemulihan sesi yang sedang pause).
   final DateTime? pausedSince;
 
@@ -145,6 +148,7 @@ class Activity {
     this.source = ActivitySource.phone,
     this.sourceDevice,
     this.pausedSince,
+    this.title,
   });
 
   double get avgPaceSecondsPerKm => distanceMeters > 0
@@ -166,6 +170,8 @@ class Activity {
     int? maxHeartRate,
     int? caloriesEstimated,
     DateTime? pausedSince,
+    String? title,
+    bool clearTitle = false,
     bool clearPausedSince = false,
   }) =>
       Activity(
@@ -184,6 +190,7 @@ class Activity {
         caloriesEstimated: caloriesEstimated ?? this.caloriesEstimated,
         source: source,
         sourceDevice: sourceDevice,
+        title: clearTitle ? null : (title ?? this.title),
         pausedSince:
             clearPausedSince ? null : (pausedSince ?? this.pausedSince),
       );
@@ -205,6 +212,7 @@ class Activity {
         'source': source,
         'source_device': sourceDevice,
         'paused_since': pausedSince?.millisecondsSinceEpoch,
+        'title': title,
         'sync_status': 'pending',
         'updated_at': DateTime.now().millisecondsSinceEpoch,
       };
@@ -231,6 +239,7 @@ class Activity {
         caloriesEstimated: m['calories_estimated'] as int?,
         source: m['source'] as String? ?? ActivitySource.phone,
         sourceDevice: m['source_device'] as String?,
+        title: m['title'] as String?,
         pausedSince: m['paused_since'] == null
             ? null
             : DateTime.fromMillisecondsSinceEpoch(m['paused_since'] as int),

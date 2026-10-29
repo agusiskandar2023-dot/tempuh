@@ -82,7 +82,7 @@ void main() {
               PRIMARY KEY (activity_id, sequence_no))''');
           },
         ));
-    await old.insert('activities', act('lama').toMap());
+    await old.insert('activities', act('lama').toMap()..remove('title'));
     for (final p in pts(30)) {
       await old.insert('activity_points', p.toMap('lama'));
     }
@@ -95,6 +95,10 @@ void main() {
     // Kolom baru tersedia dan bisa dipakai.
     await db.markSynced('lama', 'cloud-1');
     expect(await db.cloudIdOf('lama'), 'cloud-1');
+    // v3: nama aktivitas bisa disimpan.
+    await db.upsertActivity((await db.activity('lama'))!.copyWith(title: 'Lari CFD'));
+    expect((await db.activity('lama'))!.title, 'Lari CFD');
+    expect((await db.points('lama')).length, 30);
     await db.close();
   });
 
@@ -106,6 +110,19 @@ void main() {
     await db.upsertActivity(act('a1', dist: 2000)); // misal ambil HR Garmin
     expect(await db.cloudIdOf('a1'), 'c1');
     expect((await db.activitiesToPush()).length, 1);
+    await db.close();
+  });
+
+  test('nama dari web diterapkan hanya bila tidak ada perubahan lokal', () async {
+    final db = newDb();
+    await db.upsertActivity(act('a1'));
+    await db.markSynced('a1', 'c1');
+    expect(await db.applyRemoteTitle('c1', 'Dari web'), isTrue);
+    expect((await db.activity('a1'))!.title, 'Dari web');
+    expect(await db.applyRemoteTitle('c1', 'Dari web'), isFalse);
+    await db.upsertActivity((await db.activity('a1'))!.copyWith(title: 'Dari HP'));
+    expect(await db.applyRemoteTitle('c1', 'Web lagi'), isFalse);
+    expect((await db.activity('a1'))!.title, 'Dari HP');
     await db.close();
   });
 

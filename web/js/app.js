@@ -266,7 +266,19 @@ async function renderDetail(view, id) {
     <div class="detail-head">
       <span class="icon-tile">${icon(a.sport_type)}</span>
       <div style="flex:1;min-width:200px">
-        <h2 class="page" style="font-size:24px">${esc(titleOf(a))}</h2>
+        <div class="title-row">
+          <h2 class="page" style="font-size:24px" id="act-title">${esc(titleOf(a))}</h2>
+          <button class="icon-btn" type="button" id="rename" aria-label="Ubah nama aktivitas" title="Ubah nama">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
+          </button>
+        </div>
+        <form class="rename-form" id="rename-form" hidden>
+          <label class="sr-only" for="rename-input">Nama aktivitas</label>
+          <input id="rename-input" maxlength="60" placeholder="Misalnya: Lari CFD Sudirman">
+          <button class="btn btn-primary" type="submit">Simpan</button>
+          <button class="btn btn-ghost" type="button" id="rename-auto">Nama otomatis</button>
+          <button class="btn btn-ghost" type="button" id="rename-cancel">Batal</button>
+        </form>
         <div class="muted">${esc(longDate.format(new Date(a.started_at)))}${isGarmin(a) ? ` · ${a.source === 'fit_file' ? 'File .FIT' : 'Health Connect'}${a.source_device ? ` (${esc(a.source_device)})` : ''}` : ''}</div>
       </div>
       <button class="btn btn-danger" type="button" id="del">Hapus</button>
@@ -297,6 +309,34 @@ async function renderDetail(view, id) {
       </div>
       <div class="card"><h3>Split per km</h3><div id="splits" class="muted">Memuat…</div></div>
     </div>`;
+
+  const form = $('#rename-form');
+  const input = $('#rename-input');
+  const openRename = () => {
+    form.hidden = false;
+    input.value = titleOf(a);
+    input.focus();
+    input.select();
+  };
+  const saveTitle = async (title) => {
+    const value = title && title.trim() ? title.trim() : null;
+    try {
+      await api(`/activities?id=eq.${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        prefer: 'return=minimal',
+        body: { title: value, updated_at: new Date().toISOString() },
+      });
+      a.title = value;
+      $('#act-title').textContent = titleOf(a);
+      form.hidden = true;
+    } catch (e) {
+      alert(friendlyError(e));
+    }
+  };
+  $('#rename').addEventListener('click', openRename);
+  form.addEventListener('submit', (e) => { e.preventDefault(); saveTitle(input.value); });
+  $('#rename-auto').addEventListener('click', () => saveTitle(null));
+  $('#rename-cancel').addEventListener('click', () => { form.hidden = true; });
 
   $('#del').addEventListener('click', async () => {
     if (!confirm('Hapus aktivitas ini beserta rutenya? Tindakan ini tidak bisa dibatalkan.')) return;

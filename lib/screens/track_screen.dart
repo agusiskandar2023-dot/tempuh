@@ -154,6 +154,19 @@ class _SetupViewState extends State<_SetupView> {
                   ),
                   const SizedBox(height: 14),
                 ],
+                Row(children: [
+                  const Icon(Icons.motion_photos_pause_outlined, color: AppColors.muted, size: 20),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Text('Auto-pause saat berhenti',
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                  ),
+                  Switch(
+                    value: context.watch<TrackingService>().autoPauseEnabled,
+                    onChanged: (v) => context.read<TrackingService>().setAutoPause(v),
+                  ),
+                ]),
+                const SizedBox(height: 8),
                 GridView.count(
                   crossAxisCount: 4,
                   shrinkWrap: true,
@@ -294,6 +307,7 @@ class _LiveView extends StatelessWidget {
                   route: route,
                   current: fix == null ? null : LatLng(fix.latitude, fix.longitude),
                   follow: true,
+                  followZoom: a.sport == SportType.cycling ? 16 : 17,
                 ),
               ),
               Positioned(
@@ -320,7 +334,7 @@ class _LiveView extends StatelessWidget {
                               shape: BoxShape.circle,
                             ),
                           ),
-                          text: paused ? 'Dijeda' : 'Merekam',
+                          text: t.autoPaused ? 'Auto-pause' : (paused ? 'Dijeda' : 'Merekam'),
                         ),
                       ],
                     ),
@@ -339,9 +353,27 @@ class _LiveView extends StatelessWidget {
                   Text(a.sport.label,
                       style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
                   const Spacer(),
-                  const Text('Tetap merekam saat layar mati',
-                      style: TextStyle(fontSize: 12, color: AppColors.muted)),
+                  _AutoPauseChip(enabled: t.autoPauseEnabled, onTap: () => t.setAutoPause(!t.autoPauseEnabled)),
                 ]),
+                if (t.autoPaused)
+                  Container(
+                    margin: const EdgeInsets.only(top: 10),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                        color: const Color(0x26FBBF24),
+                        borderRadius: BorderRadius.circular(12)),
+                    child: const Row(children: [
+                      Icon(Icons.pause_circle_outline, color: AppColors.amber, size: 18),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text('AUTO-PAUSE · lanjut otomatis saat Anda bergerak',
+                            style: TextStyle(
+                                color: AppColors.amber,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700)),
+                      ),
+                    ]),
+                  ),
                 if (t.error != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
@@ -437,4 +469,33 @@ class _LiveView extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Saklar kecil auto-pause di panel rekam.
+class _AutoPauseChip extends StatelessWidget {
+  final bool enabled;
+  final VoidCallback onTap;
+  const _AutoPauseChip({required this.enabled, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+        button: true,
+        toggled: enabled,
+        child: Material(
+          color: enabled ? const Color(0x26A3E635) : AppColors.raised,
+          shape: const StadiumBorder(),
+          child: InkWell(
+            customBorder: const StadiumBorder(),
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Text(enabled ? 'Auto-pause: aktif' : 'Auto-pause: mati',
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: enabled ? AppColors.lime : AppColors.muted)),
+            ),
+          ),
+        ),
+      );
 }

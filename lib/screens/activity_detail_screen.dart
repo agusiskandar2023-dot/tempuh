@@ -82,6 +82,42 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
     }
   }
 
+  Future<void> _rename() async {
+    final a = _a;
+    if (a == null) return;
+    final ctrl = TextEditingController(text: activityTitle(a));
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.charcoal,
+        title: const Text('Ubah nama aktivitas'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          maxLength: 60,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(hintText: 'Misalnya: Lari CFD Sudirman'),
+          onSubmitted: (v) => Navigator.pop(ctx, v),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, ''),
+              child: const Text('Nama otomatis')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Batal')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text),
+              child: const Text('Simpan')),
+        ],
+      ),
+    );
+    if (result == null || !mounted) return;
+    final name = result.trim();
+    final updated = name.isEmpty ? a.copyWith(clearTitle: true) : a.copyWith(title: name);
+    await context.read<ActivityStore>().update(updated);
+    if (mounted) setState(() => _a = updated);
+  }
+
   Future<void> _delete() async {
     final ok = await showDialog<bool>(
       context: context,
@@ -123,15 +159,24 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 0,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(activityTitle(a),
-                style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
-            Text(date, style: const TextStyle(fontSize: 12, color: AppColors.muted)),
-          ],
+        title: InkWell(
+          onTap: _rename,
+          borderRadius: BorderRadius.circular(8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(activityTitle(a),
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+              Text(date, style: const TextStyle(fontSize: 12, color: AppColors.muted)),
+            ],
+          ),
         ),
         actions: [
+          IconButton(
+              tooltip: 'Ubah nama',
+              onPressed: _rename,
+              icon: const Icon(Icons.edit_outlined)),
           IconButton(
               tooltip: 'Hapus',
               onPressed: _delete,

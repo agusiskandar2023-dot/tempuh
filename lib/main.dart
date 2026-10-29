@@ -31,7 +31,7 @@ class TempuhApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => TrackingService()),
+        ChangeNotifierProvider(create: (_) => TrackingService()..loadSettings()),
         ChangeNotifierProvider(create: (_) => CloudService()..init()),
         ChangeNotifierProvider(create: (ctx) {
           final cloud = ctx.read<CloudService>();

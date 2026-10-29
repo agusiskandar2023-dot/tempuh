@@ -1,12 +1,15 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show HapticFeedback;
 import 'dart:ui' show Color;
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/ids.dart';
 import '../data/database.dart';
+import '../domain/auto_pause.dart';
 import '../domain/metrics.dart';
 import '../models/activity.dart';
 
@@ -39,6 +42,61 @@ class TrackingService extends ChangeNotifier {
   int _pausedSeconds = 0;
   DateTime? _pausedSince;
   DateTime _lastCheckpoint = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// Auto-pause: jeda otomatis saat diam, lanjut otomatis saat bergerak.
+  bool autoPauseEnabled = true;
+
+  /// true bila jeda saat ini dibuat oleh auto-pause (bukan tombol PAUSE).
+  bool autoPaused = false;
+  AutoPauseDetector? _auto;
+
+  Future<void> loadSettings() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      autoPauseEnabled = prefs.getBool('auto_pause') ?? true;
+      notifyListeners();
+    } catch (_) {}
+  }
+
+  Future<void> setAutoPause(bool enabled) async {
+    autoPauseEnabled = enabled;
+    if (!enabled && autoPaused) _autoResume();
+    if (enabled) _auto?.reset(DateTime.now());
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('auto_pause', enabled);
+    } catch (_) {}
+  }
+
+  void _autoPause() {
+    final now = DateTime.now();
+    state = TrackingState.paused;
+    autoPaused = true;
+    // Jeda dihitung sejak gerakan terakhir, bukan sejak terdeteksi, agar
+    // waktu diam tidak masuk waktu aktif.
+    final since = _auto?.lastMove ?? now;
+    _pausedSince = since.isAfter(now) ? now : since;
+    _auto?.markPaused();
+    HapticFeedback.mediumImpact();
+    _checkpoint();
+    notifyListeners();
+  }
+
+  void _autoResume() {
+    final now = DateTime.now();
+    final since = _pausedSince;
+    if (since != null) _pausedSeconds += now.difference(since).inSeconds;
+    _pausedSince = null;
+    autoPaused = false;
+    // Gerak berlanjut dari titik berhenti: jarak tetap dihitung.
+    _nextSegmentStart = false;
+    state = TrackingState.recording;
+    _auto?.markResumed(now);
+    HapticFeedback.mediumImpact();
+    _checkpoint();
+    notifyListeners();
+  }
 
   bool get isActive => state != TrackingState.idle;
 
@@ -132,6 +190,11 @@ class TrackingService extends ChangeNotifier {
     });
     _ticker?.cancel();
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (autoPauseEnabled &&
+          state == TrackingState.recording &&
+          (_auto?.shouldPause(DateTime.now()) ?? false)) {
+        _autoPause();
+      }
       notifyListeners();
       if (DateTime.now().difference(_lastCheckpoint).inSeconds >= 10) {
         _checkpoint();
@@ -150,6 +213,8 @@ class TrackingService extends ChangeNotifier {
     _nextSegmentStart = false;
     _unsaved.clear();
     calc = MetricsCalculator(sport);
+    autoPaused = false;
+    _auto = AutoPauseDetector.forSport(sport)..reset(DateTime.now());
     activity = Activity(
       id: newUuid(),
       sport: sport,
@@ -165,6 +230,11 @@ class TrackingService extends ChangeNotifier {
 
   void _onPosition(Position pos) {
     lastFix = pos;
+    if (state == TrackingState.paused &&
+        autoPaused &&
+        (_auto?.shouldResume(pos.latitude, pos.longitude, pos.accuracy) ?? false)) {
+      _autoResume();
+    }
     if (state != TrackingState.recording || calc == null) {
       notifyListeners();
       return;
@@ -183,12 +253,14 @@ class TrackingService extends ChangeNotifier {
       _seq++;
       _nextSegmentStart = false;
       _unsaved.add(pt);
+      _auto?.moved(DateTime.now(), pt.latitude, pt.longitude);
     }
     notifyListeners();
   }
 
   void pause() {
     if (state != TrackingState.recording) return;
+    autoPaused = false;
     state = TrackingState.paused;
     _pausedSince = DateTime.now();
     _checkpoint();
@@ -202,7 +274,9 @@ class TrackingService extends ChangeNotifier {
       _pausedSeconds += DateTime.now().difference(since).inSeconds;
     }
     _pausedSince = null;
-    _nextSegmentStart = calc?.last != null;
+    _nextSegmentStart = !autoPaused && calc?.last != null;
+    autoPaused = false;
+    _auto?.reset(DateTime.now());
     state = TrackingState.recording;
     _checkpoint();
     notifyListeners();
@@ -287,6 +361,8 @@ class TrackingService extends ChangeNotifier {
     _unsaved.clear();
     _pausedSince = null;
     _pausedSeconds = 0;
+    autoPaused = false;
+    _auto = null;
     notifyListeners();
   }
 
@@ -299,6 +375,8 @@ class TrackingService extends ChangeNotifier {
     }
     final pts = await _db.points(a.id);
     calc = MetricsCalculator(a.sport)..restore(pts);
+    autoPaused = false;
+    _auto = AutoPauseDetector.forSport(a.sport)..reset(DateTime.now());
     _seq = pts.isEmpty ? 0 : pts.last.sequenceNo + 1;
     activity = a;
     _pausedSeconds = a.pausedSeconds;

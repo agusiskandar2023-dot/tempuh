@@ -1,7 +1,7 @@
 name: movetrack_ai
 description: Tempuh - tracker lari, jalan kaki, jogging, dan sepeda. Created by KangAIs.
 publish_to: 'none'
-version: 0.4.2+7
+version: 0.5.0+8
 
 environment:
   sdk: ^3.5.0
@@ -23,6 +23,7 @@ dependencies:
   http: ^1.2.2
   crypto: ^3.0.6
   flutter_secure_storage: ^9.2.2
+  shared_preferences: ^2.3.2
 
 dev_dependencies:
   flutter_test:

@@ -14,6 +14,16 @@ Buka **Releases** di repo ini dari HP Android, unduh `Tempuh.apk` versi terbaru,
 (izinkan "Instal aplikasi tidak dikenal" untuk browser bila diminta). Setiap push ke `main` membuat
 rilis baru secara otomatis lewat GitHub Actions.
 
+## Baru di versi 0.6
+
+- **Bagikan aktivitas** ke WhatsApp / Instagram / aplikasi lain: kartu persegi (chat & feed) atau story,
+  dengan atau tanpa foto (galeri / kamera), opsi detak jantung dan sembunyikan awal-akhir rute. Bisa disimpan ke galeri.
+- **Kecepatan maks** (dihaluskan 10 detik, sepeda 5 detik) + pace tercepat: di ringkasan, saat merekam, di web.
+  Aktivitas lama dihitung ulang otomatis dari rutenya.
+- **Beranda**: pilihan Minggu/Bulan/Tahun, target yang bisa diubah, hari beruntun, rekor pribadi.
+- **Dashboard web**: 6 angka ringkasan + perbandingan periode, target, konsistensi, rekor pribadi,
+  jarak per minggu per olahraga, tren pace, kalender aktivitas, porsi olahraga, kebiasaan, peta semua rute.
+
 ## Fitur versi 0.2
 
 - Nama, ikon launcher adaptif (T-Rute), ikon notifikasi, dan tampilan sesuai mockup desain.

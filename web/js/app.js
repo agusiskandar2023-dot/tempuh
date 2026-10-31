@@ -3,7 +3,7 @@ import { signIn, signUp, signOut, currentUser, api, ApiError } from './neon.js';
 import { parseFit, FitError } from './fit.js';
 import {
   SPORTS, fmtKm, fmtDuration, fmtPace, perf, computeSplits, routeDistance,
-  elevationGain, estimateCalories,
+  elevationGain, estimateCalories, computeMaxSpeed, fmtKmh,
 } from './metrics.js';
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -21,7 +21,7 @@ const icon = (sport, size = 24) =>
 const dateFmt = new Intl.DateTimeFormat('id-ID', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 const longDate = new Intl.DateTimeFormat('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
-const state = { user: null, activities: [], loaded: false, filter: 'all', uploads: [] };
+const state = { user: null, activities: [], loaded: false, filter: 'all', uploads: [], period: 'month', recSport: null, routes: null };
 
 function partOfDay(d) {
   const h = d.getHours();
@@ -108,19 +108,21 @@ async function enterApp() {
 async function loadActivities() {
   try {
     state.activities = await api(
-      '/activities?select=id,sport_type,title,started_at,finished_at,elapsed_seconds,moving_seconds,paused_seconds,distance_meters,elevation_gain_meters,calories_estimated,avg_heart_rate,max_heart_rate,source,source_device&status=eq.completed&order=started_at.desc',
+      '/activities?select=id,sport_type,title,started_at,finished_at,elapsed_seconds,moving_seconds,paused_seconds,distance_meters,elevation_gain_meters,calories_estimated,avg_heart_rate,max_heart_rate,source,source_device,max_speed_mps&status=eq.completed&order=started_at.desc',
     ) || [];
   } catch (e) {
     state.activities = [];
     state.loadError = friendlyError(e);
   }
   state.loaded = true;
+  state.routes = null;
 }
 
 /* ===================== Router ===================== */
 let detailMap = null;
 function route() {
   if (detailMap) { detailMap.remove(); detailMap = null; }
+  if (allMap) { allMap.remove(); allMap = null; }
   const hash = location.hash.replace(/^#\/?/, '') || 'dashboard';
   const [page, arg] = hash.split('/');
   document.querySelectorAll('.nav a').forEach((a) => {
@@ -136,11 +138,472 @@ function route() {
 }
 
 /* ===================== Dashboard ===================== */
+const SPORT_COLORS = { running: '#A3E635', walking: '#38BDF8', cycling: '#FBBF24', jogging: '#A78BFA' };
+const SPORT_ORDER = ['running', 'jogging', 'walking', 'cycling'];
+const DEFAULT_TARGETS = { week: WEEKLY_TARGET_KM, month: 80, year: 1000 };
+const PERIOD_LABEL = { week: 'Minggu', month: 'Bulan', year: 'Tahun' };
+const monthName = new Intl.DateTimeFormat('id-ID', { month: 'long', year: 'numeric' });
+const shortDate = new Intl.DateTimeFormat('id-ID', { day: 'numeric', month: 'short' });
+const shortDateY = new Intl.DateTimeFormat('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+const nf = new Intl.NumberFormat('id-ID');
+const kmStr = (km, d = 1) => km.toFixed(d).replace('.', ',');
+
 function startOfWeek(d) {
   const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
   const day = (x.getDay() + 6) % 7; // Senin = 0
   x.setDate(x.getDate() - day);
   return x;
+}
+const dayKey = (d) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+
+function getTarget(p) {
+  try {
+    const v = Number(localStorage.getItem(`tempuh_target_${p}`));
+    if (v > 0) return v;
+  } catch { /* penyimpanan tidak tersedia */ }
+  return DEFAULT_TARGETS[p];
+}
+function setTarget(p, v) {
+  try { localStorage.setItem(`tempuh_target_${p}`, String(v)); } catch { /* abaikan */ }
+}
+
+function periodRange(p, now) {
+  if (p === 'week') {
+    const s = startOfWeek(now);
+    const e = new Date(s); e.setDate(e.getDate() + 7);
+    const ps = new Date(s); ps.setDate(ps.getDate() - 7);
+    const last = new Date(e); last.setDate(last.getDate() - 1);
+    return { s, e, ps, label: `${shortDate.format(s)} – ${shortDateY.format(last)}`, prev: 'minggu lalu' };
+  }
+  if (p === 'month') {
+    const s = new Date(now.getFullYear(), now.getMonth(), 1);
+    const ps = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    return { s, e: new Date(now.getFullYear(), now.getMonth() + 1, 1), ps, label: monthName.format(s), prev: monthName.format(ps).split(' ')[0] };
+  }
+  return { s: new Date(now.getFullYear(), 0, 1), e: new Date(now.getFullYear() + 1, 0, 1), ps: new Date(now.getFullYear() - 1, 0, 1), label: String(now.getFullYear()), prev: String(now.getFullYear() - 1) };
+}
+
+function summarize(list, s, e) {
+  const sel = list.filter((a) => { const d = new Date(a.started_at); return d >= s && d < e; });
+  return {
+    n: sel.length,
+    km: sel.reduce((t, a) => t + Number(a.distance_meters) / 1000, 0),
+    sec: sel.reduce((t, a) => t + (a.moving_seconds || 0), 0),
+    kcal: sel.reduce((t, a) => t + (a.calories_estimated || 0), 0),
+    elev: sel.reduce((t, a) => t + (Number(a.elevation_gain_meters) || 0), 0),
+    days: new Set(sel.map((a) => dayKey(new Date(a.started_at)))).size,
+  };
+}
+
+function delta(cur, prev, abs = false) {
+  if (prev <= 0) return cur > 0 ? { t: 'baru', c: 'up' } : { t: '', c: '' };
+  if (abs) {
+    const d = Math.round(cur - prev);
+    return d === 0 ? { t: '= sama', c: 'same' } : { t: `${d > 0 ? '↑' : '↓'} ${Math.abs(d)}`, c: d > 0 ? 'up' : 'down' };
+  }
+  const pct = Math.round(((cur - prev) / prev) * 100);
+  return pct === 0 ? { t: '= sama', c: 'same' } : { t: `${pct > 0 ? '↑' : '↓'} ${Math.abs(pct)}%`, c: pct > 0 ? 'up' : 'down' };
+}
+
+function fmtHours(sec) {
+  const h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60);
+  return h > 0 ? `${h}j ${String(m).padStart(2, '0')}m` : `${m}m`;
+}
+
+function dayStreak(acts, now) {
+  const days = new Set(acts.map((a) => dayKey(new Date(a.started_at))));
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (!days.has(dayKey(d))) d.setDate(d.getDate() - 1);
+  let n = 0;
+  while (days.has(dayKey(d))) { n++; d.setDate(d.getDate() - 1); }
+  return n;
+}
+
+function longestStreak(acts) {
+  const days = [...new Set(acts.map((a) => { const d = new Date(a.started_at); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); }))].sort((a, b) => a - b);
+  let best = 0, cur = 0, prev = null;
+  for (const t of days) {
+    cur = prev != null && Math.round((t - prev) / 86400000) === 1 ? cur + 1 : 1;
+    best = Math.max(best, cur);
+    prev = t;
+  }
+  return best;
+}
+
+/** Minggu berturut-turut target tercapai (minggu ini ikut dihitung bila sudah tercapai). */
+function weekTargetStreak(acts, now, target) {
+  let s = startOfWeek(now), n = 0;
+  const kmIn = (st) => { const e = new Date(st); e.setDate(e.getDate() + 7); return summarize(acts, st, e).km; };
+  if (kmIn(s) >= target) n++;
+  for (;;) {
+    s = new Date(s); s.setDate(s.getDate() - 7);
+    if (kmIn(s) >= target) n++; else break;
+  }
+  return n;
+}
+
+/** Rekor pribadi: terjauh, terlama, tercepat (≥ 1 km), kecepatan maks. */
+function personalRecords(acts, sport, now) {
+  const list = acts.filter((a) => a.sport_type === sport)
+    .sort((a, b) => new Date(a.started_at) - new Date(b.started_at));
+  const recent = new Date(now); recent.setDate(recent.getDate() - 7);
+  const best = (val) => {
+    let top = null, topV = null, beat = false;
+    for (const a of list) {
+      const v = val(a);
+      if (v == null || !(v > 0)) continue;
+      if (topV == null || v > topV) { beat = topV != null; topV = v; top = a; }
+    }
+    return top ? { a: top, v: topV, isNew: beat && new Date(top.started_at) >= recent } : null;
+  };
+  const speed = SPORTS[sport]?.speed;
+  const avg = (a) => (Number(a.distance_meters) >= 1000 && a.moving_seconds > 0 ? Number(a.distance_meters) / a.moving_seconds : null);
+  const out = [];
+  const far = best((a) => Number(a.distance_meters));
+  if (far) out.push({ label: 'Terjauh', value: fmtKm(far.v), unit: 'km', ...far });
+  const lng = best((a) => a.moving_seconds);
+  if (lng) out.push({ label: 'Terlama', value: fmtDuration(lng.v), unit: '', ...lng });
+  const fast = best(avg);
+  if (fast) out.push({ label: 'Tercepat', value: speed ? fmtKmh(fast.v) : fmtPace(1000 / fast.v), unit: speed ? 'km/j' : '/km', ...fast });
+  const mx = best((a) => Number(a.max_speed_mps) || null);
+  if (mx) out.push({ label: 'Kecepatan maks', value: fmtKmh(mx.v), unit: 'km/j', ...mx });
+  return out;
+}
+
+function weeklyStackChart(weeks) {
+  const W = 640, H = 210, padL = 34, padB = 26, padT = 12;
+  const max = Math.max(1, ...weeks.map((w) => w.total));
+  const step = max > 80 ? 40 : max > 40 ? 20 : max > 20 ? 10 : max > 8 ? 5 : 2;
+  const top = Math.ceil(max / step) * step;
+  const bw = (W - padL) / weeks.length;
+  const y = (v) => padT + (H - padT - padB) * (1 - v / top);
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Jarak per minggu per jenis olahraga, 12 minggu terakhir">`;
+  for (let v = 0; v <= top; v += step) {
+    svg += `<line x1="${padL}" x2="${W}" y1="${y(v)}" y2="${y(v)}" stroke="#243049" stroke-width="1"/>`;
+    svg += `<text x="${padL - 8}" y="${y(v) + 4}" fill="#94A3B8" font-size="11" text-anchor="end">${v}</text>`;
+  }
+  weeks.forEach((w, i) => {
+    const x = padL + i * bw + bw * 0.18;
+    let base = 0;
+    for (const k of SPORT_ORDER) {
+      const v = w.by[k] || 0;
+      if (v <= 0) continue;
+      svg += `<rect x="${x}" y="${y(base + v)}" width="${bw * 0.64}" height="${Math.max(0, y(base) - y(base + v) - 1)}" fill="${SPORT_COLORS[k]}"><title>${w.label} · ${SPORTS[k].label}: ${kmStr(v)} km</title></rect>`;
+      base += v;
+    }
+    const last = i === weeks.length - 1;
+    if (i % 2 === weeks.length % 2 || last) {
+      svg += `<text x="${x + bw * 0.32}" y="${H - 8}" fill="${last ? '#F1F5F9' : '#94A3B8'}" font-size="11" text-anchor="middle">${w.label}</text>`;
+    }
+  });
+  return svg + '</svg>';
+}
+
+function paceTrendChart(weeks) {
+  const pts = weeks.map((w, i) => ({ i, p: w.runKm >= 0.5 ? w.runSec / w.runKm : null, label: w.label })).filter((x) => x.p);
+  if (pts.length < 2) return { svg: '<div class="empty small">Belum cukup data lari untuk grafik pace (butuh minimal 2 minggu).</div>', note: '' };
+  const W = 640, H = 200, padL = 46, padB = 26, padT = 14;
+  const lo = Math.min(...pts.map((x) => x.p)), hi = Math.max(...pts.map((x) => x.p));
+  const span = Math.max(30, hi - lo);
+  const yMin = lo - span * 0.15, yMax = hi + span * 0.15;
+  const x = (i) => padL + ((W - padL - 10) * i) / (weeks.length - 1);
+  // Pace lebih kecil = lebih cepat = lebih tinggi di grafik.
+  const y = (p) => padT + ((H - padT - padB) * (p - yMin)) / (yMax - yMin);
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Pace lari rata-rata per minggu">`;
+  for (const p of [lo, (lo + hi) / 2, hi]) {
+    svg += `<line x1="${padL}" x2="${W}" y1="${y(p)}" y2="${y(p)}" stroke="#243049"/><text x="${padL - 8}" y="${y(p) + 4}" fill="#94A3B8" font-size="11" text-anchor="end">${fmtPace(p)}</text>`;
+  }
+  svg += `<polyline fill="none" stroke="#A3E635" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" points="${pts.map((q) => `${x(q.i)},${y(q.p)}`).join(' ')}"/>`;
+  for (const q of pts) svg += `<circle cx="${x(q.i)}" cy="${y(q.p)}" r="4" fill="#A3E635"><title>${q.label}: ${fmtPace(q.p)} /km</title></circle>`;
+  svg += `<text x="${x(0)}" y="${H - 8}" fill="#94A3B8" font-size="11">${weeks[0].label}</text><text x="${x(weeks.length - 1)}" y="${H - 8}" fill="#F1F5F9" font-size="11" text-anchor="end">Minggu ini</text>`;
+  const diff = pts[0].p - pts.at(-1).p;
+  const note = Math.abs(diff) < 3 ? 'Stabil' : diff > 0 ? `Makin cepat ${fmtPace(diff)} /km` : `Lebih lambat ${fmtPace(-diff)} /km`;
+  return { svg: svg + '</svg>', note, good: diff >= 0 };
+}
+
+function heatmapHtml(acts, year) {
+  const kmByDay = new Map();
+  for (const a of acts) {
+    const d = new Date(a.started_at);
+    if (d.getFullYear() !== year) continue;
+    const k = dayKey(d);
+    kmByDay.set(k, (kmByDay.get(k) || 0) + Number(a.distance_meters) / 1000);
+  }
+  const shades = ['#243049', '#3D5A1C', '#5C8A22', '#82BC2B', '#A3E635'];
+  const lvl = (km) => (km <= 0 ? 0 : km < 3 ? 1 : km < 6 ? 2 : km < 10 ? 3 : 4);
+  const start = startOfWeek(new Date(year, 0, 1));
+  const today = new Date();
+  let cells = '';
+  const d = new Date(start);
+  let weeks = 0;
+  while (d.getFullYear() <= year && weeks < 54) {
+    for (let i = 0; i < 7; i++) {
+      const inYear = d.getFullYear() === year;
+      const km = inYear ? kmByDay.get(dayKey(d)) || 0 : 0;
+      const future = d > today;
+      cells += `<span class="hm-cell" style="background:${inYear && !future ? shades[lvl(km)] : 'transparent'}" title="${inYear ? `${shortDateY.format(d)}: ${km ? `${kmStr(km)} km` : 'tidak ada aktivitas'}` : ''}"></span>`;
+      d.setDate(d.getDate() + 1);
+    }
+    weeks++;
+  }
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+  return `<div class="hm-scroll"><div class="hm" style="--weeks:${weeks}">
+      <div class="hm-months">${months.map((m) => `<span>${m}</span>`).join('')}</div>
+      <div class="hm-grid">${cells}</div>
+    </div></div>
+    <div class="hm-legend">Sedikit ${shades.map((c) => `<span class="hm-cell" style="background:${c}"></span>`).join('')} Jauh</div>`;
+}
+
+function renderDashboard(view) {
+  const acts = state.activities;
+  const now = new Date();
+  const period = state.period || 'month';
+  const r = periodRange(period, now);
+  const cur = summarize(acts, r.s, r.e);
+  const prev = summarize(acts, r.ps, r.s);
+  const daysInPeriod = Math.round((r.e - r.s) / 86400000);
+  const kpis = [
+    { label: 'Jarak', value: kmStr(cur.km), unit: 'km', d: delta(cur.km, prev.km) },
+    { label: 'Waktu aktif', value: fmtHours(cur.sec), unit: '', d: delta(cur.sec, prev.sec) },
+    { label: 'Aktivitas', value: String(cur.n), unit: '', d: delta(cur.n, prev.n, true) },
+    { label: 'Kalori', value: nf.format(cur.kcal), unit: 'kkal', d: delta(cur.kcal, prev.kcal) },
+    { label: 'Elevasi', value: nf.format(Math.round(cur.elev)), unit: 'm', d: delta(cur.elev, prev.elev) },
+    { label: 'Hari aktif', value: String(cur.days), unit: period === 'year' ? 'hari' : `dari ${daysInPeriod}`, d: delta(cur.days, prev.days, true) },
+  ];
+
+  const targets = ['week', 'month', 'year'].map((p) => {
+    const rr = periodRange(p, now);
+    const km = summarize(acts, rr.s, rr.e).km;
+    const goal = getTarget(p);
+    const left = goal - km;
+    return {
+      p, km, goal, pct: Math.min(100, (km / goal) * 100),
+      label: p === 'week' ? 'Minggu ini' : p === 'month' ? rr.label : rr.label,
+      note: left <= 0 ? `Tercapai! Lebih ${kmStr(-left)} km` : `Perlu ${kmStr(left)} km lagi`,
+    };
+  });
+
+  const streak = dayStreak(acts, now);
+  const longest = longestStreak(acts);
+  const weekStreak = weekTargetStreak(acts, now, getTarget('week'));
+  const last7 = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+    const e = new Date(d); e.setDate(e.getDate() + 1);
+    const km = summarize(acts, d, e).km;
+    last7.push({ km, day: ['M', 'S', 'S', 'R', 'K', 'J', 'S'][d.getDay()] });
+  }
+  const shade = (km) => (km <= 0 ? '#243049' : km < 3 ? '#3D5A1C' : km < 6 ? '#5C8A22' : km < 10 ? '#82BC2B' : '#A3E635');
+
+  const sportCounts = SPORT_ORDER.map((k) => [k, acts.filter((a) => a.sport_type === k).length]);
+  if (!state.recSport) state.recSport = (sportCounts.slice().sort((a, b) => b[1] - a[1])[0] || ['running'])[0];
+  const records = personalRecords(acts, state.recSport, now);
+
+  const wk = startOfWeek(now);
+  const weeks = [];
+  for (let i = 11; i >= 0; i--) {
+    const s = new Date(wk); s.setDate(s.getDate() - 7 * i);
+    const e = new Date(s); e.setDate(e.getDate() + 7);
+    const sel = acts.filter((a) => { const d = new Date(a.started_at); return d >= s && d < e; });
+    const by = {};
+    for (const a of sel) by[a.sport_type] = (by[a.sport_type] || 0) + Number(a.distance_meters) / 1000;
+    const runs = sel.filter((a) => a.sport_type === 'running' || a.sport_type === 'jogging');
+    weeks.push({
+      label: `${s.getDate()}/${s.getMonth() + 1}`, by,
+      total: Object.values(by).reduce((t, v) => t + v, 0),
+      runKm: runs.reduce((t, a) => t + Number(a.distance_meters) / 1000, 0),
+      runSec: runs.reduce((t, a) => t + (a.moving_seconds || 0), 0),
+    });
+  }
+  const pace = paceTrendChart(weeks);
+
+  const totalKm = acts.reduce((t, a) => t + Number(a.distance_meters) / 1000, 0);
+  const mix = SPORT_ORDER.map((k) => {
+    const km = acts.filter((a) => a.sport_type === k).reduce((t, a) => t + Number(a.distance_meters) / 1000, 0);
+    return { k, km, pct: totalKm > 0 ? Math.round((km / totalKm) * 100) : 0 };
+  }).filter((m) => m.km > 0);
+
+  const dow = [0, 0, 0, 0, 0, 0, 0];
+  const tod = { Pagi: 0, Siang: 0, Sore: 0, Malam: 0 };
+  const hourCount = new Array(24).fill(0);
+  for (const a of acts) {
+    const d = new Date(a.started_at);
+    dow[(d.getDay() + 6) % 7]++;
+    const h = d.getHours();
+    hourCount[h]++;
+    tod[h < 11 ? 'Pagi' : h < 15 ? 'Siang' : h < 19 ? 'Sore' : 'Malam']++;
+  }
+  const dowNames = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
+  const dowLong = ['Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu', 'Minggu'];
+  const maxDow = Math.max(1, ...dow);
+  const topDow = dow.indexOf(Math.max(...dow));
+  const topHour = hourCount.indexOf(Math.max(...hourCount));
+  const topPart = topHour < 11 ? 'pagi' : topHour < 15 ? 'siang' : topHour < 19 ? 'sore' : 'malam';
+  const habit = acts.length
+    ? `${dowLong[topDow]} ${topPart}, ${String(topHour).padStart(2, '0')}.00–${String((topHour + 1) % 24).padStart(2, '0')}.00`
+    : '–';
+
+  const name = state.user.name ? `, ${esc(state.user.name.split(' ')[0])}` : '';
+  view.innerHTML = `
+    <div class="dash-head">
+      <div style="flex:1;min-width:220px">
+        <h2 class="page">Halo${name}</h2>
+        <p class="sub" style="margin:0">${esc(r.label)} · dibanding ${esc(r.prev)}${state.loadError ? ` <span style="color:#fca5a5">${esc(state.loadError)}</span>` : ''}</p>
+      </div>
+      <div class="seg" role="group" aria-label="Periode">
+        ${['week', 'month', 'year'].map((p) => `<button type="button" data-period="${p}" aria-pressed="${p === period}">${PERIOD_LABEL[p]}</button>`).join('')}
+      </div>
+    </div>
+
+    <section class="kpis" aria-label="Ringkasan periode">
+      ${kpis.map((k) => `<div class="kpi"><span class="stat-label">${k.label}</span>
+        <span class="kpi-value num">${k.value}${k.unit ? ` <small>${k.unit}</small>` : ''}</span>
+        <span class="delta ${k.d.c}">${k.d.t || '&nbsp;'}</span></div>`).join('')}
+    </section>
+
+    <div class="grid two-col section-gap">
+      <div class="card">
+        <div class="card-head"><h3>Target</h3><button class="btn btn-ghost btn-sm" type="button" id="edit-target">Ubah target</button></div>
+        <form id="target-form" class="target-form" hidden>
+          ${['week', 'month', 'year'].map((p) => `<label>${p === 'week' ? 'Mingguan' : p === 'month' ? 'Bulanan' : 'Tahunan'} <input type="number" min="1" step="1" name="${p}" value="${getTarget(p)}"> km</label>`).join('')}
+          <button class="btn btn-primary btn-sm" type="submit">Simpan</button>
+        </form>
+        ${targets.map((t) => `<div class="target">
+          <div class="target-row"><span>${esc(t.label)}</span><span class="num"><b>${kmStr(t.km)}</b><span class="muted"> / ${nf.format(t.goal)} km</span></span></div>
+          <div class="progress" role="progressbar" aria-valuenow="${Math.round(t.pct)}" aria-valuemin="0" aria-valuemax="100" aria-label="Target ${esc(t.label)}"><div style="width:${t.pct}%"></div></div>
+          <span class="muted small">${t.note}</span></div>`).join('')}
+      </div>
+      <div class="card">
+        <h3>Konsistensi</h3>
+        <div class="streaks">
+          <div class="streak"><span class="stat-label">Hari aktif beruntun</span><span class="kpi-value lime">${streak} <small>hari</small></span><span class="muted small">Terpanjang: ${longest} hari</span></div>
+          <div class="streak"><span class="stat-label">Minggu target tercapai</span><span class="kpi-value">${weekStreak} <small>minggu</small></span><span class="muted small">Berturut-turut</span></div>
+        </div>
+        <div class="stat-label" style="margin:14px 0 6px">7 hari terakhir</div>
+        <div class="last7">${last7.map((d) => `<div><span style="background:${shade(d.km)}" title="${d.km ? `${kmStr(d.km)} km` : 'tidak ada aktivitas'}"></span><small>${d.day}</small></div>`).join('')}</div>
+      </div>
+    </div>
+
+    <section class="card section-gap">
+      <div class="card-head wrap">
+        <h3 style="font-size:18px">Rekor pribadi</h3>
+        <div class="chips" role="group" aria-label="Jenis olahraga" style="margin:0">
+          ${SPORT_ORDER.map((k) => `<button class="chip" type="button" data-rec="${k}" aria-pressed="${k === state.recSport}">${SPORTS[k].label}</button>`).join('')}
+        </div>
+      </div>
+      ${records.length ? `<div class="records">${records.map((x) => `<a class="record ${x.isNew ? 'new' : ''}" href="#/aktivitas/${esc(x.a.id)}">
+          <span class="record-top"><span class="stat-label">${x.label}</span>${x.isNew ? '<span class="new-badge">Rekor baru!</span>' : ''}</span>
+          <span class="kpi-value num">${x.value}${x.unit ? ` <small>${x.unit}</small>` : ''}</span>
+          <span class="muted small">${esc(shortDateY.format(new Date(x.a.started_at)))}</span></a>`).join('')}</div>
+          ${records.length < 4 ? '<p class="muted small" style="margin:10px 0 0">Kecepatan maks muncul setelah aktivitas disinkronkan dari aplikasi versi terbaru.</p>' : ''}`
+        : `<div class="empty small">Belum ada aktivitas ${esc(SPORTS[state.recSport].label.toLowerCase())}.</div>`}
+    </section>
+
+    <div class="grid two-col section-gap">
+      <div class="card chart">
+        <h3>Jarak per minggu <span class="muted">(km, 12 minggu)</span></h3>
+        <div class="legend">${SPORT_ORDER.map((k) => `<span><i style="background:${SPORT_COLORS[k]}"></i>${SPORTS[k].label}</span>`).join('')}</div>
+        ${weeklyStackChart(weeks)}
+      </div>
+      <div class="card chart">
+        <div class="card-head"><h3>Pace lari rata-rata</h3>${pace.note ? `<span class="pill ${pace.good ? '' : 'warn'}">${pace.note}</span>` : ''}</div>
+        ${pace.svg}
+        <p class="muted small" style="margin:6px 0 0">Lari & jogging per minggu. Lebih tinggi = lebih cepat.</p>
+      </div>
+    </div>
+
+    <section class="card section-gap">
+      <h3>Kalender aktivitas ${now.getFullYear()}</h3>
+      ${heatmapHtml(acts, now.getFullYear())}
+    </section>
+
+    <div class="grid two-col section-gap">
+      <div class="card">
+        <h3>Porsi olahraga</h3>
+        ${mix.length ? mix.map((m) => `<div class="target">
+          <div class="target-row"><span>${SPORTS[m.k].label}</span><span class="num">${kmStr(m.km)} km · <b>${m.pct}%</b></span></div>
+          <div class="bar"><div style="width:${m.pct}%;background:${SPORT_COLORS[m.k]}"></div></div></div>`).join('') : '<p class="muted">Belum ada data.</p>'}
+      </div>
+      <div class="card">
+        <h3>Kebiasaan</h3>
+        <p style="margin:-6px 0 12px">Paling sering: <b class="lime">${esc(habit)}</b></p>
+        <div class="dow">${dow.map((n, i) => `<div><span style="height:${Math.max(4, (n / maxDow) * 100)}%;background:${i === topDow && n ? '#A3E635' : '#3D5A1C'}" title="${dowLong[i]}: ${n} aktivitas"></span><small>${dowNames[i]}</small></div>`).join('')}</div>
+        <div class="tod">${Object.entries(tod).map(([k, n]) => `<div><span class="muted">${k}</span><b>${acts.length ? Math.round((n / acts.length) * 100) : 0}%</b></div>`).join('')}</div>
+      </div>
+    </div>
+
+    <div class="grid two-col section-gap">
+      <div class="card">
+        <div class="card-head"><h3>Peta semua rute</h3><span class="muted small" id="routes-count"></span></div>
+        <div class="all-map" id="all-map"><div class="no-route">Memuat rute…</div></div>
+        <p class="muted small" style="margin:8px 0 0">Makin terang = makin sering dilewati.</p>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Aktivitas terbaru</h3><a href="#/riwayat">Lihat semua</a></div>
+        ${acts.length ? `<div class="list">${acts.slice(0, 4).map(itemHtml).join('')}</div>`
+          : `<div class="empty small">Belum ada aktivitas. <a href="#/upload">Upload file .FIT dari Garmin</a> atau sinkronkan dari aplikasi HP.</div>`}
+      </div>
+    </div>`;
+
+  view.querySelectorAll('[data-period]').forEach((b) => b.addEventListener('click', () => {
+    state.period = b.dataset.period;
+    renderDashboard(view);
+  }));
+  view.querySelectorAll('[data-rec]').forEach((b) => b.addEventListener('click', () => {
+    state.recSport = b.dataset.rec;
+    renderDashboard(view);
+  }));
+  const tf = $('#target-form');
+  $('#edit-target').addEventListener('click', () => { tf.hidden = !tf.hidden; });
+  tf.addEventListener('submit', (e) => {
+    e.preventDefault();
+    for (const p of ['week', 'month', 'year']) {
+      const v = Number(tf.elements[p].value);
+      if (v > 0) setTarget(p, v);
+    }
+    renderDashboard(view);
+  });
+  drawAllRoutes();
+}
+
+let allMap = null;
+async function drawAllRoutes() {
+  if (allMap) { allMap.remove(); allMap = null; }
+  const el = $('#all-map');
+  if (!el) return;
+  if (typeof L === 'undefined') { el.innerHTML = '<div class="no-route">Peta gagal dimuat.</div>'; return; }
+  const ids = state.activities.slice(0, 200).map((a) => a.id);
+  if (!ids.length) { el.innerHTML = '<div class="no-route">Belum ada rute.</div>'; return; }
+  try {
+    if (!state.routes) {
+      const rows = await api(`/route_preview?select=activity_id,sequence_no,latitude,longitude,segment_start&order=activity_id,sequence_no&limit=60000`) || [];
+      const by = new Map();
+      for (const p of rows) {
+        if (!by.has(p.activity_id)) by.set(p.activity_id, [[]]);
+        const segs = by.get(p.activity_id);
+        if (p.segment_start && segs.at(-1).length) segs.push([]);
+        segs.at(-1).push([p.latitude, p.longitude]);
+      }
+      state.routes = by;
+    }
+  } catch (e) {
+    el.innerHTML = `<div class="no-route">${esc(friendlyError(e))}</div>`;
+    return;
+  }
+  if (!document.body.contains(el)) return;
+  const sport = new Map(state.activities.map((a) => [a.id, a.sport_type]));
+  const routes = [...state.routes.entries()].filter(([id]) => sport.has(id));
+  $('#routes-count').textContent = `${routes.length} rute`;
+  if (!routes.length) { el.innerHTML = '<div class="no-route">Belum ada rute GPS.</div>'; return; }
+  el.innerHTML = '';
+  allMap = L.map(el, { zoomControl: true, attributionControl: true });
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap contributors' }).addTo(allMap);
+  const group = L.featureGroup();
+  for (const [id, segs] of routes) {
+    L.polyline(segs, { color: SPORT_COLORS[sport.get(id)] || '#A3E635', weight: 4, opacity: 0.35 }).addTo(group);
+  }
+  group.addTo(allMap);
+  allMap.fitBounds(group.getBounds(), { padding: [20, 20] });
 }
 
 function itemHtml(a) {
@@ -153,85 +616,6 @@ function itemHtml(a) {
     </span>
     <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M9 6l6 6-6 6" fill="none" stroke="#94A3B8" stroke-width="2" stroke-linecap="round"/></svg>
   </a>`;
-}
-
-function weeklyChart(weeks) {
-  const W = 640, H = 200, padL = 36, padB = 28, padT = 16;
-  const max = Math.max(1, ...weeks.map((w) => w.km));
-  const step = max > 40 ? 20 : max > 20 ? 10 : max > 8 ? 5 : 2;
-  const top = Math.ceil(max / step) * step;
-  const bw = (W - padL) / weeks.length;
-  const y = (v) => padT + (H - padT - padB) * (1 - v / top);
-  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Jarak per minggu, 12 minggu terakhir">`;
-  for (let v = 0; v <= top; v += step) {
-    svg += `<line x1="${padL}" x2="${W}" y1="${y(v)}" y2="${y(v)}" stroke="#243049" stroke-width="1"/>`;
-    svg += `<text x="${padL - 8}" y="${y(v) + 4}" fill="#94A3B8" font-size="11" text-anchor="end">${v}</text>`;
-  }
-  weeks.forEach((w, i) => {
-    const x = padL + i * bw + bw * 0.18;
-    const h = Math.max(0, y(0) - y(w.km));
-    const last = i === weeks.length - 1;
-    svg += `<rect x="${x}" y="${y(w.km)}" width="${bw * 0.64}" height="${h}" rx="4" fill="${last ? '#A3E635' : '#64748B'}"><title>${w.label}: ${w.km.toFixed(1)} km</title></rect>`;
-    if (i % 2 === weeks.length % 2 || last) {
-      svg += `<text x="${x + bw * 0.32}" y="${H - 8}" fill="${last ? '#F1F5F9' : '#94A3B8'}" font-size="11" text-anchor="middle">${w.label}</text>`;
-    }
-  });
-  return svg + '</svg>';
-}
-
-function renderDashboard(view) {
-  const acts = state.activities;
-  const now = new Date();
-  const wk = startOfWeek(now);
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const sum = (list) => ({
-    km: list.reduce((s, a) => s + Number(a.distance_meters) / 1000, 0),
-    sec: list.reduce((s, a) => s + (a.moving_seconds || 0), 0),
-    n: list.length,
-  });
-  const thisWeek = sum(acts.filter((a) => new Date(a.started_at) >= wk));
-  const thisMonth = sum(acts.filter((a) => new Date(a.started_at) >= monthStart));
-  const all = sum(acts);
-  const weeks = [];
-  for (let i = 11; i >= 0; i--) {
-    const s = new Date(wk); s.setDate(s.getDate() - 7 * i);
-    const e = new Date(s); e.setDate(e.getDate() + 7);
-    const km = acts.filter((a) => { const d = new Date(a.started_at); return d >= s && d < e; })
-      .reduce((t, a) => t + Number(a.distance_meters) / 1000, 0);
-    weeks.push({ km, label: `${s.getDate()}/${s.getMonth() + 1}` });
-  }
-  const bySport = Object.keys(SPORTS).map((k) => ({ k, ...sum(acts.filter((a) => a.sport_type === k)) }));
-  const maxSport = Math.max(1, ...bySport.map((s) => s.km));
-  const pct = Math.min(100, (thisWeek.km / WEEKLY_TARGET_KM) * 100);
-  const name = state.user.name ? `, ${esc(state.user.name.split(' ')[0])}` : '';
-
-  view.innerHTML = `
-    <h2 class="page">Halo${name}</h2>
-    <p class="sub">Ringkasan aktivitas Anda.${state.loadError ? ` <span style="color:#fca5a5">${esc(state.loadError)}</span>` : ''}</p>
-    <div class="grid grid-4">
-      <div class="card">
-        <div class="stat-label">Minggu ini</div>
-        <div class="stat-value num">${thisWeek.km.toFixed(1).replace('.', ',')} <small>/ ${WEEKLY_TARGET_KM} km</small></div>
-        <div class="progress" role="progressbar" aria-valuenow="${Math.round(pct)}" aria-valuemin="0" aria-valuemax="100" aria-label="Progres target mingguan"><div style="width:${pct}%"></div></div>
-      </div>
-      <div class="card"><div class="stat-label">Bulan ini</div><div class="stat-value num">${thisMonth.km.toFixed(1).replace('.', ',')} <small>km</small></div><div class="muted">${thisMonth.n} aktivitas · ${fmtDuration(thisMonth.sec)}</div></div>
-      <div class="card"><div class="stat-label">Waktu aktif minggu ini</div><div class="stat-value num">${fmtDuration(thisWeek.sec)}</div><div class="muted">${thisWeek.n} aktivitas</div></div>
-      <div class="card"><div class="stat-label">Total semua</div><div class="stat-value num">${all.km.toFixed(1).replace('.', ',')} <small>km</small></div><div class="muted">${all.n} aktivitas</div></div>
-    </div>
-    <div class="grid grid-2 section-gap">
-      <div class="card chart"><h3>Jarak per minggu <span class="muted">(km, 12 minggu)</span></h3>${weeklyChart(weeks)}</div>
-      <div class="card">
-        <h3>Per jenis olahraga</h3>
-        ${bySport.map((s) => `<div class="sport-row"><span>${SPORTS[s.k].label}</span><div class="bar"><div style="width:${(s.km / maxSport) * 100}%"></div></div><span class="num muted" style="text-align:right">${s.km.toFixed(1).replace('.', ',')} km</span></div>`).join('')}
-      </div>
-    </div>
-    <div class="section-gap">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
-        <h3 style="margin:0;font-size:17px">Aktivitas terakhir</h3><span class="spacer"></span><a href="#/riwayat">Lihat semua</a>
-      </div>
-      ${acts.length ? `<div class="list">${acts.slice(0, 5).map(itemHtml).join('')}</div>`
-        : `<div class="empty">Belum ada aktivitas. <a href="#/upload">Upload file .FIT dari Garmin</a> atau sinkronkan dari aplikasi HP.</div>`}
-    </div>`;
 }
 
 /* ===================== Riwayat ===================== */
@@ -303,6 +687,8 @@ async function renderDetail(view, id) {
           <div><div class="stat-label">Elevasi naik</div><div class="stat-value">${Math.round(Number(a.elevation_gain_meters) || 0)} <small>m</small></div></div>
           <div><div class="stat-label">Kalori (est.)</div><div class="stat-value">${a.calories_estimated ?? '-'}</div></div>
           <div><div class="stat-label">Waktu total</div><div class="stat-value">${fmtDuration(a.elapsed_seconds)}</div></div>
+          <div class="hl" id="max-speed" hidden></div>
+          <div class="hl" id="best-pace" hidden></div>
           ${a.avg_heart_rate ? `<div><div class="stat-label">HR rata-rata</div><div class="stat-value">${a.avg_heart_rate} <small>bpm</small></div></div>` : ''}
           ${a.max_heart_rate ? `<div><div class="stat-label">HR maks</div><div class="stat-value">${a.max_heart_rate} <small>bpm</small></div></div>` : ''}
         </div>
@@ -356,6 +742,28 @@ async function renderDetail(view, id) {
     $('#map').innerHTML = `<div class="no-route">${esc(friendlyError(e))}</div>`;
   }
   if (location.hash !== `#/aktivitas/${id}`) return; // pengguna sudah pindah halaman
+
+  // Kecepatan maks: dari database, atau dihitung dari rute lalu disimpan.
+  let maxMps = Number(a.max_speed_mps) || 0;
+  if (!maxMps && pts.length > 1) {
+    maxMps = computeMaxSpeed(pts, a.sport_type) || 0;
+    if (maxMps > 0) {
+      a.max_speed_mps = Math.round(maxMps * 1000) / 1000;
+      api(`/activities?id=eq.${encodeURIComponent(id)}&max_speed_mps=is.null`, {
+        method: 'PATCH', prefer: 'return=minimal', body: { max_speed_mps: a.max_speed_mps },
+      }).catch((e) => console.warn('max speed', e));
+    }
+  }
+  if (maxMps > 0) {
+    const ms = $('#max-speed');
+    ms.hidden = false;
+    ms.innerHTML = `<div class="stat-label">Kecepatan maks</div><div class="stat-value lime">${fmtKmh(maxMps)} <small>km/j</small></div>`;
+    if (!speed) {
+      const bp = $('#best-pace');
+      bp.hidden = false;
+      bp.innerHTML = `<div class="stat-label">Pace tercepat</div><div class="stat-value lime">${fmtPace(1000 / maxMps)} <small>/km</small></div>`;
+    }
+  }
 
   const splits = computeSplits(pts);
   const splitBox = $('#splits');
@@ -522,6 +930,10 @@ async function saveFit(u) {
     calories_estimated: f.totalCalories ?? estimateCalories(f.sport, moving, kmh),
     avg_heart_rate: f.avgHeartRate ?? null,
     max_heart_rate: f.maxHeartRate ?? null,
+    max_speed_mps: (() => {
+      const v = computeMaxSpeed(pts.map((p) => ({ ...p, recorded_at: p.recorded_at.toISOString() })), f.sport);
+      return v ? Math.round(v * 1000) / 1000 : null;
+    })(),
     source: 'fit_file',
     source_device: f.isGarmin ? 'Garmin' : u.name,
   };

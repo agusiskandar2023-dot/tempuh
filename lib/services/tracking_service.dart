@@ -30,6 +30,9 @@ class TrackingService extends ChangeNotifier {
   Activity? activity;
   MetricsCalculator? calc;
 
+  /// Kecepatan maks sesi berjalan (m/s, dihaluskan).
+  double get maxSpeedMps => calc?.maxSpeedMps ?? 0;
+
   /// Posisi terakhir dari GPS (juga saat pause / sebelum mulai).
   Position? lastFix;
   String? error;
@@ -336,6 +339,7 @@ class TrackingService extends ChangeNotifier {
       distanceMeters: dist,
       elevationGainMeters: calc?.elevationGainMeters ?? 0,
       caloriesEstimated: estimateCalories(a.sport, moving, speedKmh),
+      maxSpeedMps: computeMaxSpeedMps(calc?.points ?? const [], a.sport) ?? 0,
       clearPausedSince: true,
     );
     await _db.insertPoints(a.id, List.of(_unsaved));

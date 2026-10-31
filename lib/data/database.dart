@@ -80,7 +80,7 @@ class AppDatabase {
     ));
   }
 
-  static const _schemaVersion = 3;
+  static const _schemaVersion = 4;
 
   /// Migrasi bertahap dari [from] ke versi terbaru. Hanya menambah.
   static Future<void> _migrate(Database db, int from) async {
@@ -94,6 +94,10 @@ class AppDatabase {
     if (from < 3) {
       // v3: nama aktivitas yang bisa diedit.
       await db.execute('ALTER TABLE activities ADD COLUMN title TEXT');
+    }
+    if (from < 4) {
+      // v4: kecepatan maksimum (diisi ulang dari titik rute untuk data lama).
+      await db.execute('ALTER TABLE activities ADD COLUMN max_speed_mps REAL');
     }
   }
 
@@ -259,6 +263,26 @@ class AppDatabase {
     final rows = await d.query('activities',
         columns: ['id'], where: 'id = ?', whereArgs: [id], limit: 1);
     return rows.isNotEmpty;
+  }
+
+  /// Aktivitas selesai yang kecepatan maksnya belum pernah dihitung.
+  Future<List<Activity>> missingMaxSpeed() async {
+    final d = await db;
+    final rows = await d.query('activities',
+        where: 'status = ? AND max_speed_mps IS NULL',
+        whereArgs: [ActivityStatus.finished.name]);
+    return rows.map(Activity.fromMap).toList();
+  }
+
+  /// Menyimpan kecepatan maks hasil hitung ulang (0 = tidak ada data rute).
+  /// Aktivitas yang sudah tersinkron ditandai untuk dikirim ulang.
+  Future<void> setMaxSpeed(String id, double mps) async {
+    final d = await db;
+    await d.rawUpdate(
+        "UPDATE activities SET max_speed_mps = ?, "
+        "sync_status = CASE WHEN sync_status = 'synced' AND ? > 0 THEN 'pending' ELSE sync_status END "
+        "WHERE id = ?",
+        [mps, mps, id]);
   }
 
   /// Menghapus aktivitas lokal. Bila sudah pernah tersinkron, catat agar

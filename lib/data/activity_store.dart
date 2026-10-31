@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../domain/metrics.dart';
 import '../models/activity.dart';
 import 'database.dart';
 
@@ -25,6 +26,31 @@ class ActivityStore extends ChangeNotifier {
       notifyListeners();
     }
     onChanged?.call();
+    if (items.any((a) => a.maxSpeedMps == null)) _backfillMaxSpeed();
+  }
+
+  bool _backfilling = false;
+  bool _backfillFailed = false;
+
+  /// Menghitung kecepatan maks untuk aktivitas lama dari titik rutenya.
+  /// Data lama tidak diubah selain mengisi kolom yang masih kosong.
+  Future<void> _backfillMaxSpeed() async {
+    if (_backfilling || _backfillFailed) return;
+    _backfilling = true;
+    var changed = 0;
+    try {
+      for (final a in await _db.missingMaxSpeed()) {
+        final pts = await _db.points(a.id);
+        await _db.setMaxSpeed(a.id, computeMaxSpeedMps(pts, a.sport) ?? 0);
+        changed++;
+      }
+    } catch (e) {
+      debugPrint('Backfill kecepatan maks gagal: $e');
+      _backfillFailed = true;
+    } finally {
+      _backfilling = false;
+    }
+    if (changed > 0) await reload();
   }
 
   Future<void> delete(String id) async {

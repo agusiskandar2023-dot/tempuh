@@ -82,7 +82,9 @@ void main() {
               PRIMARY KEY (activity_id, sequence_no))''');
           },
         ));
-    await old.insert('activities', act('lama').toMap()..remove('title'));
+    await old.insert('activities', act('lama').toMap()
+      ..remove('title')
+      ..remove('max_speed_mps'));
     for (final p in pts(30)) {
       await old.insert('activity_points', p.toMap('lama'));
     }
@@ -98,6 +100,15 @@ void main() {
     // v3: nama aktivitas bisa disimpan.
     await db.upsertActivity((await db.activity('lama'))!.copyWith(title: 'Lari CFD'));
     expect((await db.activity('lama'))!.title, 'Lari CFD');
+    expect((await db.points('lama')).length, 30);
+    // v4: kecepatan maks kosong dulu, lalu diisi ulang tanpa mengubah data lain.
+    expect((await db.missingMaxSpeed()).map((a) => a.id), ['lama']);
+    await db.setMaxSpeed('lama', 3.5);
+    final after = (await db.activity('lama'))!;
+    expect(after.maxSpeedMps, 3.5);
+    expect(after.title, 'Lari CFD');
+    expect(after.distanceMeters, 1000);
+    expect(await db.missingMaxSpeed(), isEmpty);
     expect((await db.points('lama')).length, 30);
     await db.close();
   });
@@ -123,6 +134,18 @@ void main() {
     await db.upsertActivity((await db.activity('a1'))!.copyWith(title: 'Dari HP'));
     expect(await db.applyRemoteTitle('c1', 'Web lagi'), isFalse);
     expect((await db.activity('a1'))!.title, 'Dari HP');
+    await db.close();
+  });
+
+  test('kecepatan maks hasil hitung ulang dikirim ulang ke server', () async {
+    final db = newDb();
+    await db.upsertActivity(act('a1'));
+    await db.markSynced('a1', 'c1');
+    await db.setMaxSpeed('a1', 0); // tanpa rute: tidak perlu kirim ulang
+    expect(await db.activitiesToPush(), isEmpty);
+    await db.setMaxSpeed('a1', 4.2);
+    expect((await db.activitiesToPush()).length, 1);
+    expect(await db.cloudIdOf('a1'), 'c1');
     await db.close();
   });
 

@@ -405,17 +405,21 @@ class _LiveView extends StatelessWidget {
                                     ? '--'
                                     : (speed * 3.6).toStringAsFixed(1).replaceAll('.', ','),
                                 unit: 'km/j',
-                                size: 22)
+                                size: 19)
                             : StatTile('Pace', formatPace(calc.currentPaceSecondsPerKm()),
-                                unit: '/km', size: 22),
+                                unit: '/km', size: 19),
                       ),
                       Expanded(
+                          child: StatTile('Kec. maks',
+                              t.maxSpeedMps > 0 ? formatSpeedKmh(t.maxSpeedMps) : '--',
+                              unit: 'km/j', size: 19, color: AppColors.lime)),
+                      Expanded(
                           child: StatTile('Total', formatDuration(t.elapsedSeconds),
-                              size: 22)),
+                              size: 19)),
                       Expanded(
                           child: StatTile('Elevasi',
                               calc.elevationGainMeters.round().toString(),
-                              unit: 'm', size: 22)),
+                              unit: 'm', size: 19)),
                     ],
                   ),
                 ),

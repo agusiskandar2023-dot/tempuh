@@ -96,3 +96,37 @@ export function perf(a) {
   }
   return `${fmtPace(dist > 0 ? mov / (dist / 1000) : 0)} /km`;
 }
+
+/** Batas kecepatan masuk akal (m/s), sama dengan aplikasi. */
+export const MAX_PLAUSIBLE = { walking: 4, jogging: 7, running: 9, cycling: 25 };
+
+/**
+ * Kecepatan maksimum (m/s): rata-rata tertinggi pada jendela minimal 10 detik
+ * (sepeda 5 detik) di dalam satu segmen. Port dari computeMaxSpeedMps (Dart).
+ */
+export function computeMaxSpeed(pts, sport) {
+  if (!pts || pts.length < 2) return null;
+  const w = sport === 'cycling' ? 5 : 10;
+  const lim = MAX_PLAUSIBLE[sport] ?? 9;
+  const t = pts.map((p) => new Date(p.recorded_at).getTime() / 1000);
+  const cum = [0], seg = [0];
+  for (let i = 1; i < pts.length; i++) {
+    if (pts[i].segment_start) { seg.push(seg[i - 1] + 1); cum.push(cum[i - 1]); }
+    else {
+      seg.push(seg[i - 1]);
+      cum.push(cum[i - 1] + haversine(pts[i - 1].latitude, pts[i - 1].longitude, pts[i].latitude, pts[i].longitude));
+    }
+  }
+  let best = 0, j = 0;
+  for (let i = 1; i < pts.length; i++) {
+    if (seg[j] !== seg[i]) j = i;
+    while (j + 1 < i && t[i] - t[j + 1] >= w) j++;
+    const dt = t[i] - t[j];
+    if (dt < w || dt > w * 4) continue;
+    const v = (cum[i] - cum[j]) / dt;
+    if (v <= lim && v > best) best = v;
+  }
+  return best > 0 ? best : null;
+}
+
+export const fmtKmh = (mps) => (mps * 3.6).toFixed(1).replace('.', ',');

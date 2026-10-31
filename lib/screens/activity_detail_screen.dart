@@ -11,6 +11,7 @@ import '../services/health_service.dart';
 import '../widgets/route_map.dart';
 import '../widgets/stat_tile.dart';
 import 'fullscreen_map_screen.dart';
+import 'share_sheet.dart';
 import 'home_screen.dart';
 
 class ActivityDetailScreen extends StatefulWidget {
@@ -152,6 +153,11 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
           body: const Center(child: Text('Aktivitas tidak ditemukan.')));
     }
     final route = _pts.map((p) => LatLng(p.latitude, p.longitude)).toList();
+    // Aktivitas lama yang belum dihitung ulang: hitung langsung dari rute.
+    final maxMps = (a.maxSpeedMps ?? 0) > 0
+        ? a.maxSpeedMps!
+        : (computeMaxSpeedMps(_pts, a.sport) ?? 0);
+    final shareable = a.copyWith(maxSpeedMps: maxMps);
     final splits = computeSplits(_pts);
     final date =
         DateFormat('EEEE, d MMMM yyyy · HH:mm', 'id_ID').format(a.startedAt);
@@ -173,6 +179,10 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
           ),
         ),
         actions: [
+          IconButton(
+              tooltip: 'Bagikan',
+              onPressed: () => showShareSheet(context, shareable, _pts),
+              icon: const Icon(Icons.share_outlined, color: AppColors.lime)),
           IconButton(
               tooltip: 'Ubah nama',
               onPressed: _rename,
@@ -247,6 +257,26 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
                     StatTile('Waktu total', formatDuration(a.elapsedSeconds)),
                   ],
                 ),
+                if (maxMps > 0) ...[
+                  const SizedBox(height: 12),
+                  Row(children: [
+                    Expanded(
+                      child: _HighlightTile(
+                          label: 'Kecepatan maks',
+                          value: formatSpeedKmh(maxMps),
+                          unit: 'km/j'),
+                    ),
+                    if (!a.sport.showsSpeed) ...[
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _HighlightTile(
+                            label: 'Pace tercepat',
+                            value: formatPace(1000 / maxMps),
+                            unit: '/km'),
+                      ),
+                    ],
+                  ]),
+                ],
                 const SizedBox(height: 14),
                 Material(
                   color: AppColors.charcoal,
@@ -366,5 +396,29 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
           ]),
         ),
     ];
+  }
+}
+
+/// Kotak metrik yang disorot (kecepatan maks / pace tercepat).
+class _HighlightTile extends StatelessWidget {
+  final String label;
+  final String value;
+  final String unit;
+  const _HighlightTile({required this.label, required this.value, required this.unit});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppColors.charcoal,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.lime.withValues(alpha: 0.5)),
+      ),
+      child: Row(children: [
+        Expanded(child: StatTile(label, value, unit: unit, size: 22, color: AppColors.lime)),
+        const Icon(Icons.bolt, color: AppColors.lime),
+      ]),
+    );
   }
 }

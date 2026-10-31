@@ -73,4 +73,36 @@ void main() {
     expect(formatPace(330), '5:30');
     expect(formatPace(null), '--:--');
   });
+
+  test('kecepatan maks dihaluskan: lonjakan 2 detik tidak dihitung', () {
+    // Lari 3 m/s selama 60 detik, dengan 2 detik 6 m/s di tengah.
+    final pts = <TrackPoint>[];
+    var north = 0.0;
+    for (var i = 0; i <= 60; i++) {
+      pts.add(pt(i, i, north));
+      north += (i == 30 || i == 31) ? 6 : 3;
+    }
+    final v = computeMaxSpeedMps(pts, SportType.running)!;
+    // Jendela 10 detik: maks (8*3 + 2*6)/10 = 3,6 m/s, bukan 6 m/s.
+    expect(v, closeTo(3.6, 0.05));
+    expect(computeMaxSpeedMps(pts.take(5).toList(), SportType.running), isNull);
+  });
+
+  test('kecepatan maks tidak melewati jeda pause', () {
+    final pts = [
+      for (var i = 0; i <= 20; i++) pt(i, i, i * 2.0),
+      // Resume 5 menit kemudian, 300 m lebih jauh: tidak boleh jadi "cepat".
+      for (var i = 0; i <= 20; i++) pt(21 + i, 320 + i, 340 + i * 2.0, seg: i == 0),
+    ];
+    expect(computeMaxSpeedMps(pts, SportType.walking), closeTo(2.0, 0.01));
+  });
+
+  test('kalkulator live mencatat kecepatan maks', () {
+    final c = MetricsCalculator(SportType.cycling);
+    for (var i = 0; i <= 30; i++) {
+      c.add(pt(i, i, i < 15 ? i * 6.0 : 84 + (i - 14) * 8.0));
+    }
+    expect(c.maxSpeedMps, greaterThan(7.5));
+    expect(c.maxSpeedMps, lessThanOrEqualTo(8.01));
+  });
 }

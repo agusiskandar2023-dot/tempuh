@@ -128,6 +128,9 @@ class Activity {
   /// Nama yang diberi pengguna. null = nama otomatis ("Lari pagi").
   final String? title;
 
+  /// Kecepatan maksimum (m/s), dihaluskan beberapa detik. null = belum dihitung.
+  final double? maxSpeedMps;
+
   /// Waktu pause terakhir dimulai (untuk pemulihan sesi yang sedang pause).
   final DateTime? pausedSince;
 
@@ -149,7 +152,15 @@ class Activity {
     this.sourceDevice,
     this.pausedSince,
     this.title,
+    this.maxSpeedMps,
   });
+
+  /// Kecepatan maks dalam km/jam (0 bila belum ada).
+  double get maxSpeedKmh => (maxSpeedMps ?? 0) * 3.6;
+
+  /// Pace tercepat (detik/km) yang setara dengan kecepatan maks.
+  double get bestPaceSecondsPerKm =>
+      (maxSpeedMps ?? 0) > 0 ? 1000 / maxSpeedMps! : 0;
 
   double get avgPaceSecondsPerKm => distanceMeters > 0
       ? movingSeconds / (distanceMeters / 1000)
@@ -171,6 +182,7 @@ class Activity {
     int? caloriesEstimated,
     DateTime? pausedSince,
     String? title,
+    double? maxSpeedMps,
     bool clearTitle = false,
     bool clearPausedSince = false,
   }) =>
@@ -191,6 +203,7 @@ class Activity {
         source: source,
         sourceDevice: sourceDevice,
         title: clearTitle ? null : (title ?? this.title),
+        maxSpeedMps: maxSpeedMps ?? this.maxSpeedMps,
         pausedSince:
             clearPausedSince ? null : (pausedSince ?? this.pausedSince),
       );
@@ -213,6 +226,7 @@ class Activity {
         'source_device': sourceDevice,
         'paused_since': pausedSince?.millisecondsSinceEpoch,
         'title': title,
+        'max_speed_mps': maxSpeedMps,
         'sync_status': 'pending',
         'updated_at': DateTime.now().millisecondsSinceEpoch,
       };
@@ -240,6 +254,7 @@ class Activity {
         source: m['source'] as String? ?? ActivitySource.phone,
         sourceDevice: m['source_device'] as String?,
         title: m['title'] as String?,
+        maxSpeedMps: (m['max_speed_mps'] as num?)?.toDouble(),
         pausedSince: m['paused_since'] == null
             ? null
             : DateTime.fromMillisecondsSinceEpoch(m['paused_since'] as int),

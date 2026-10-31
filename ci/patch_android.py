@@ -68,6 +68,12 @@ def patch_manifest():
     if perms:
         xml = re.sub(r"(<manifest[^>]*>\n)", lambda m: m.group(1) + perms, xml, count=1)
 
+    # Simpan kartu bagikan ke galeri (gal) di Android 9 ke bawah.
+    if "WRITE_EXTERNAL_STORAGE" not in xml:
+        xml = re.sub(r"(<manifest[^>]*>\n)", lambda m: m.group(1) +
+                     '    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />\n',
+                     xml, count=1)
+
     if "com.google.android.apps.healthdata" not in xml:
         if "<queries>" in xml:
             xml = xml.replace(
@@ -91,6 +97,12 @@ def patch_manifest():
             sys.exit("MainActivity tidak ditemukan di manifest")
         end = xml.find("</activity>", idx)
         xml = xml[:end] + RATIONALE_FILTER + "        " + xml[end:]
+
+    # Membuka web Tempuh di browser (url_launcher).
+    if 'android:scheme="https"' not in xml:
+        xml = xml.replace("</queries>",
+                          '    <intent>\n            <action android:name="android.intent.action.VIEW" />\n'
+                          '            <data android:scheme="https" />\n        </intent>\n    </queries>', 1)
 
     if "ViewPermissionUsageActivity" not in xml:
         xml = xml.replace("</application>", ALIAS + "    </application>", 1)

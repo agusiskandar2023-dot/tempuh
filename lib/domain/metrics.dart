@@ -40,6 +40,9 @@ class MetricsCalculator {
   double? _elevRef;
   RejectReason lastReject = RejectReason.none;
 
+  /// Kecepatan maks sejauh ini (m/s), dihaluskan [maxSpeedWindow].
+  double maxSpeedMps = 0;
+
   MetricsCalculator(this.sport, {this.maxAccuracy = 25, double? minStep})
       : minStep = minStep ?? (sport == SportType.cycling ? 5 : 3);
 
@@ -50,6 +53,7 @@ class MetricsCalculator {
     points.clear();
     distanceMeters = 0;
     elevationGainMeters = 0;
+    maxSpeedMps = 0;
     _elevRef = null;
     for (final p in stored) {
       _apply(p);
@@ -105,6 +109,12 @@ class MetricsCalculator {
       }
     }
     points.add(p);
+    if (!p.segmentStart) {
+      final v = currentSpeedMps(window: maxSpeedWindow(sport));
+      if (v != null && v <= sport.maxPlausibleSpeed && v > maxSpeedMps) {
+        maxSpeedMps = v;
+      }
+    }
   }
 
   /// Pace saat ini (detik/km) dari jendela [window] terakhir dalam segmen
@@ -138,6 +148,58 @@ class MetricsCalculator {
   List<ActivitySplit> splits({double splitMeters = 1000}) =>
       computeSplits(points, splitMeters: splitMeters);
 }
+
+/// Jendela penghalusan kecepatan maks: sepeda lebih pendek karena
+/// sprint sepeda singkat; jalan/lari 10 detik agar lonjakan GPS teredam.
+Duration maxSpeedWindow(SportType sport) => sport == SportType.cycling
+    ? const Duration(seconds: 5)
+    : const Duration(seconds: 10);
+
+/// Kecepatan maksimum (m/s): rata-rata kecepatan tertinggi pada jendela
+/// minimal [window] di dalam satu segmen (jeda pause tidak dihitung).
+/// Mengembalikan null bila data tidak cukup (mis. tanpa rute GPS).
+double? computeMaxSpeedMps(List<TrackPoint> pts, SportType sport,
+    {Duration? window}) {
+  final w = (window ?? maxSpeedWindow(sport)).inMilliseconds / 1000;
+  if (pts.length < 2) return null;
+  // Jarak kumulatif; segmen baru dimulai pada titik segmentStart.
+  final cum = List<double>.filled(pts.length, 0);
+  final seg = List<int>.filled(pts.length, 0);
+  for (var i = 1; i < pts.length; i++) {
+    final a = pts[i - 1];
+    final b = pts[i];
+    if (b.segmentStart) {
+      seg[i] = seg[i - 1] + 1;
+      cum[i] = cum[i - 1];
+    } else {
+      seg[i] = seg[i - 1];
+      cum[i] = cum[i - 1] +
+          haversineMeters(a.latitude, a.longitude, b.latitude, b.longitude);
+    }
+  }
+  double best = 0;
+  var j = 0;
+  for (var i = 1; i < pts.length; i++) {
+    if (seg[j] != seg[i]) j = i;
+    // Majukan j selama jendela [j+1, i] masih memenuhi lebar minimum.
+    while (j + 1 < i &&
+        pts[i].recordedAt.difference(pts[j + 1].recordedAt).inMilliseconds /
+                1000 >=
+            w) {
+      j++;
+    }
+    final dt =
+        pts[i].recordedAt.difference(pts[j].recordedAt).inMilliseconds / 1000;
+    // Jendela terlalu pendek, atau ada celah data terlalu panjang.
+    if (dt < w || dt > w * 4) continue;
+    final v = (cum[i] - cum[j]) / dt;
+    if (v <= sport.maxPlausibleSpeed && v > best) best = v;
+  }
+  return best > 0 ? best : null;
+}
+
+String formatSpeedKmh(double mps) =>
+    (mps * 3.6).toStringAsFixed(1).replaceAll('.', ',');
 
 /// Split per [splitMeters] berdasarkan waktu bergerak antar titik (jeda
 /// pause tidak dihitung). Split terakhir yang parsial disertakan bila

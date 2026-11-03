@@ -10,6 +10,7 @@ import '../domain/metrics.dart';
 import '../domain/replay.dart';
 import '../models/activity.dart';
 import '../screens/home_screen.dart' show activityTitle;
+import '../services/replay_map.dart';
 
 /// Ukuran logis satu frame video (9:16). Diekspor ×2 → 720×1280.
 const replayLogicalSize = Size(360, 640);
@@ -22,8 +23,12 @@ class ReplayPainter extends CustomPainter {
   final double t;
   final ui.Image? photo;
   final bool showHeartRate;
+  final ReplayMapView view;
+  final ReplayMap? map;
 
   ReplayPainter({
+    required this.view,
+    this.map,
     required this.activity,
     required this.data,
     required this.timeline,
@@ -50,10 +55,31 @@ class ReplayPainter extends CustomPainter {
     const w = 360.0, h = 640.0;
     final tl = timeline;
     c.drawRect(const Rect.fromLTWH(0, 0, w, h), Paint()..color = _bg);
-    _paintMapBackdrop(c);
+    final m = map;
+    if (m != null && m.hasTiles) {
+      final paint = Paint()..filterQuality = FilterQuality.medium;
+      for (final tile in m.tiles) {
+        final img = tile.image;
+        c.drawImageRect(img, Rect.fromLTWH(0, 0, img.width.toDouble(), img.height.toDouble()),
+            tile.rect.inflate(0.3), paint);
+      }
+      // Sedikit digelapkan agar garis rute & teks tetap menonjol.
+      c.drawRect(const Rect.fromLTWH(0, 0, w, h),
+          Paint()..color = AppColors.navy.withValues(alpha: 0.12));
+    } else {
+      _paintMapBackdrop(c);
+    }
+    // Gradasi gelap di atas untuk panel angka.
+    c.drawRect(
+        const Rect.fromLTWH(0, 0, w, 175),
+        Paint()
+          ..shader = ui.Gradient.linear(const Offset(0, 0), const Offset(0, 175), [
+            AppColors.navy.withValues(alpha: 0.85),
+            AppColors.navy.withValues(alpha: 0),
+          ]));
 
     // ---- rute ----
-    final proj = _Projection.fit(data, const Rect.fromLTWH(34, 220, 292, 380));
+    final proj = _ViewProj(data, view);
     final f = tl.routeFraction(t);
     if (data.length >= 2) {
       final all = Path()..moveTo(proj.x(0), proj.y(0));
@@ -146,6 +172,18 @@ class ReplayPainter extends CustomPainter {
 
       // Ikon orang (atau sepeda) yang bergerak.
       _mover(c, head, f);
+    }
+
+    if (m != null && m.hasTiles) {
+      final tp = TextPainter(
+        text: TextSpan(
+            text: ReplayMap.attribution,
+            style: _ts(6.7, weight: FontWeight.w500, color: AppColors.navy)),
+        textDirection: ui.TextDirection.ltr,
+      )..layout();
+      final rr = Rect.fromLTWH(w - tp.width - 10, h - tp.height - 6, tp.width + 6, tp.height + 2);
+      c.drawRect(rr, Paint()..color = Colors.white.withValues(alpha: 0.75));
+      tp.paint(c, Offset(rr.left + 3, rr.top + 1));
     }
 
     // ---- HUD atas (judul + angka berjalan) ----
@@ -259,7 +297,7 @@ class ReplayPainter extends CustomPainter {
   void _maxCallout(Canvas c, Offset at, double mps, double scale, double op) {
     const bw = 150.0, bh = 50.0;
     final cx = at.dx.clamp(bw / 2 + 12, 360 - bw / 2 - 12);
-    final top = at.dy + 22;
+    final top = at.dy + 22 + bh > 630 ? at.dy - 52 - bh : at.dy + 22;
     c.save();
     c.translate(cx, top + bh / 2);
     c.scale(scale);
@@ -322,15 +360,15 @@ class ReplayPainter extends CustomPainter {
   void _hud(Canvas c, double f) {
     final date = DateFormat('EEE, d MMM yyyy · HH:mm', 'id_ID').format(activity.startedAt);
     c.save();
-    c.translate(21, 32);
+    c.translate(18, 20);
     paintTempuhLogo(c, 24, AppColors.charcoal);
     c.restore();
-    _text(c, activityTitle(activity), const Offset(52, 30), _ts(14.7, ls: -0.3), maxWidth: 290);
-    _text(c, date, const Offset(52, 49), _ts(8.7, weight: FontWeight.w500, color: AppColors.soft),
+    _text(c, activityTitle(activity), const Offset(49, 18), _ts(14.7, ls: -0.3), maxWidth: 290);
+    _text(c, date, const Offset(49, 37), _ts(8.7, weight: FontWeight.w500, color: AppColors.soft),
         maxWidth: 290);
 
     final panel = RRect.fromRectAndRadius(
-        const Rect.fromLTWH(16, 80, 328, 74), const Radius.circular(12));
+        const Rect.fromLTWH(14, 58, 332, 70), const Radius.circular(12));
     c.drawRRect(panel, Paint()..color = AppColors.navy.withValues(alpha: 0.88));
     final m = data.metersAt(f);
     final s = data.secondsAt(f);
@@ -343,15 +381,15 @@ class ReplayPainter extends CustomPainter {
         : (m > 30 ? formatPace(s / (m / 1000)) : '--:--');
     final labels = ['Jarak', 'Waktu', perfLabel];
     for (var i = 0; i < 3; i++) {
-      _text(c, labels[i], Offset(cols[i], 92), _ts(8.7, weight: FontWeight.w500, color: AppColors.muted));
+      _text(c, labels[i], Offset(cols[i], 69), _ts(8.7, weight: FontWeight.w500, color: AppColors.muted));
     }
     _rich(c, [TextSpan(text: formatKm(m).replaceAll('.', ','), style: big), TextSpan(text: ' km', style: unit)],
-        Offset(cols[0], 108), maxWidth: 104);
-    _rich(c, [TextSpan(text: formatDuration(s.round()), style: big)], Offset(cols[1], 108), maxWidth: 104);
+        Offset(cols[0], 85), maxWidth: 104);
+    _rich(c, [TextSpan(text: formatDuration(s.round()), style: big)], Offset(cols[1], 85), maxWidth: 104);
     _rich(c, [
       TextSpan(text: perfValue, style: big),
       TextSpan(text: activity.sport.showsSpeed ? ' km/j' : ' /km', style: unit)
-    ], Offset(cols[2], 108), maxWidth: 104);
+    ], Offset(cols[2], 85), maxWidth: 104);
   }
 
   void _intro(Canvas c, double op) {
@@ -444,36 +482,17 @@ class ReplayPainter extends CustomPainter {
       old.t != t ||
       old.data != data ||
       old.photo != photo ||
+      old.map != map ||
       old.showHeartRate != showHeartRate ||
       old.timeline.seconds != timeline.seconds ||
       old.timeline.hasPhoto != timeline.hasPhoto;
 }
 
-/// Proyeksi equirectangular sederhana agar rute pas di kotak tujuan.
-class _Projection {
-  final ReplayData d;
-  final double k, minX, minY, scale, ox, oy;
-  _Projection(this.d, this.k, this.minX, this.minY, this.scale, this.ox, this.oy);
-
-  factory _Projection.fit(ReplayData d, Rect box) {
-    if (d.length == 0) return _Projection(d, 1, 0, 0, 1, box.left, box.top);
-    final lat0 = d.lat.reduce((a, b) => a + b) / d.length;
-    final k = math.cos(lat0 * math.pi / 180);
-    var minX = double.infinity, maxX = -double.infinity;
-    var minY = double.infinity, maxY = -double.infinity;
-    for (var i = 0; i < d.length; i++) {
-      final x = d.lon[i] * k, y = -d.lat[i];
-      minX = math.min(minX, x);
-      maxX = math.max(maxX, x);
-      minY = math.min(minY, y);
-      maxY = math.max(maxY, y);
-    }
-    final w = math.max(maxX - minX, 1e-9), h = math.max(maxY - minY, 1e-9);
-    final s = math.min(box.width / w, box.height / h);
-    return _Projection(d, k, minX, minY, s, box.left + (box.width - w * s) / 2,
-        box.top + (box.height - h * s) / 2);
-  }
-
-  double x(int i) => ox + (d.lon[i] * k - minX) * scale;
-  double y(int i) => oy + (-d.lat[i] - minY) * scale;
+/// Posisi titik rute (satuan logis) memakai proyeksi peta [ReplayMapView].
+class _ViewProj {
+  final List<Offset> pts;
+  _ViewProj(ReplayData d, ReplayMapView v)
+      : pts = [for (var i = 0; i < d.length; i++) v.toLogical(d.lat[i], d.lon[i])];
+  double x(int i) => pts[i].dx;
+  double y(int i) => pts[i].dy;
 }

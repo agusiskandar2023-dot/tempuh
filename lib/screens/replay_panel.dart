@@ -10,6 +10,7 @@ import '../core/theme.dart';
 import '../domain/metrics.dart';
 import '../domain/replay.dart';
 import '../models/activity.dart';
+import '../services/replay_map.dart';
 import '../services/replay_video.dart';
 import '../widgets/replay_painter.dart';
 import 'home_screen.dart' show activityTitle;
@@ -36,6 +37,10 @@ class _ReplayPanelState extends State<ReplayPanel> with SingleTickerProviderStat
   bool _busy = false;
   double _progress = 0;
   ReplayData? _data;
+  ReplayMapView? _view;
+  ReplayMap? _map;
+  Future<void>? _mapLoading;
+  bool _mapFailed = false;
   String? _videoPath;
   String? _videoKey;
 
@@ -44,7 +49,7 @@ class _ReplayPanelState extends State<ReplayPanel> with SingleTickerProviderStat
       ReplayTimeline(_seconds.toDouble(), hasPhoto: _usePhoto && _photo != null);
 
   String get _settingsKey =>
-      '$_seconds|${_usePhoto && _photo != null}|${_photo.hashCode}|$_hideEnds|$_showHr';
+      '$_seconds|${_usePhoto && _photo != null}|${_photo.hashCode}|$_hideEnds|$_showHr|${_map?.hasTiles}';
 
   @override
   void initState() {
@@ -61,11 +66,27 @@ class _ReplayPanelState extends State<ReplayPanel> with SingleTickerProviderStat
     _maker.cancel();
     _anim.dispose();
     _photo?.dispose();
+    _map?.dispose();
     super.dispose();
   }
 
   void _rebuildData() {
     _data = ReplayData.build(widget.activity, widget.points, hideEnds: _hideEnds);
+    final view = ReplayMapView.fit(_data!);
+    _view = view;
+    _map?.dispose();
+    _map = null;
+    _mapFailed = false;
+    _mapLoading = ReplayMap.load(view).then((m) {
+      if (!mounted || _view != view) {
+        m.dispose();
+        return;
+      }
+      setState(() {
+        _map = m;
+        _mapFailed = !m.hasTiles;
+      });
+    });
   }
 
   void _setSeconds(int s) {
@@ -110,7 +131,11 @@ class _ReplayPanelState extends State<ReplayPanel> with SingleTickerProviderStat
     });
     _anim.stop();
     try {
+      // Tunggu peta selesai dimuat agar video memakai peta asli.
+      await _mapLoading;
       final path = await _maker.make(
+        view: _view!,
+        map: _map,
         activity: widget.activity,
         data: _data!,
         timeline: _timeline,
@@ -239,6 +264,8 @@ class _ReplayPanelState extends State<ReplayPanel> with SingleTickerProviderStat
                   animation: _anim,
                   builder: (_, __) => CustomPaint(
                     painter: ReplayPainter(
+                      view: _view!,
+                      map: _map,
                       activity: widget.activity,
                       data: data,
                       timeline: tl,
@@ -252,7 +279,17 @@ class _ReplayPanelState extends State<ReplayPanel> with SingleTickerProviderStat
             ),
           ),
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 6),
+        Text(
+            _map == null && !_mapFailed
+                ? 'Memuat peta…'
+                : _mapFailed
+                    ? 'Peta tidak bisa dimuat (tanpa internet?). Video memakai latar sederhana.'
+                    : 'Peta: OpenStreetMap',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+                fontSize: 12, color: _mapFailed ? AppColors.amber : AppColors.muted)),
+        const SizedBox(height: 8),
         _segment([
           ('15 detik', _seconds == 15, _busy ? null : () => _setSeconds(15)),
           ('30 detik', _seconds == 30, _busy ? null : () => _setSeconds(30)),
@@ -350,7 +387,7 @@ class _ReplayPanelState extends State<ReplayPanel> with SingleTickerProviderStat
           ),
         ]),
         const SizedBox(height: 8),
-        Text('Video ${tl.seconds.round()} detik, 9:16 (720×1280) · dibuat di HP tanpa internet',
+        Text('Video ${tl.seconds.round()} detik, 9:16 (720×1280), dibuat di HP',
             textAlign: TextAlign.center,
             style: const TextStyle(fontSize: 12, color: AppColors.muted)),
       ],

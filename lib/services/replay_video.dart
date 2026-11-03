@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../domain/replay.dart';
 import '../models/activity.dart';
+import 'replay_map.dart';
 import '../widgets/replay_painter.dart';
 
 /// Membuat video replay MP4 di HP: setiap frame digambar dengan
@@ -24,6 +25,8 @@ class ReplayVideoMaker {
     required Activity activity,
     required ReplayData data,
     required ReplayTimeline timeline,
+    required ReplayMapView view,
+    ReplayMap? map,
     ui.Image? photo,
     bool showHeartRate = true,
     void Function(double progress)? onProgress,
@@ -46,6 +49,8 @@ class ReplayVideoMaker {
         final rec = ui.PictureRecorder();
         final canvas = ui.Canvas(rec);
         ReplayPainter(
+          view: view,
+          map: map,
           activity: activity,
           data: data,
           timeline: timeline,

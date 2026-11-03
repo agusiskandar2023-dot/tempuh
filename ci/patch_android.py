@@ -127,6 +127,12 @@ def patch_main_activity():
     files = glob.glob("android/app/src/main/kotlin/**/MainActivity.kt", recursive=True)
     if not files:
         sys.exit("MainActivity.kt tidak ditemukan")
+    # MainActivity Tempuh (FlutterFragmentActivity + kanal pembuat video)
+    # dan encoder MP4 dari ci/android_kotlin.
+    import os, shutil
+    pkg_dir = os.path.dirname(files[0])
+    for name in os.listdir("ci/android_kotlin"):
+        shutil.copyfile(os.path.join("ci/android_kotlin", name), os.path.join(pkg_dir, name))
     for path in files:
         with open(path, encoding="utf-8") as f:
             src = f.read()

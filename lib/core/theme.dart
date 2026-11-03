@@ -73,8 +73,16 @@ class _LogoPainter extends CustomPainter {
   _LogoPainter(this.bg);
 
   @override
-  void paint(Canvas canvas, Size size) {
-    final s = size.width / 108;
+  void paint(Canvas canvas, Size size) => paintTempuhLogo(canvas, size.width, bg);
+
+  @override
+  bool shouldRepaint(covariant _LogoPainter old) => old.bg != bg;
+}
+
+/// Menggambar logo Tempuh berukuran [size] di titik (0,0) kanvas.
+void paintTempuhLogo(Canvas canvas, double size, Color bg) {
+    final s = size / 108;
+    canvas.save();
     canvas.scale(s);
     canvas.drawRRect(
         RRect.fromRectAndRadius(
@@ -91,8 +99,5 @@ class _LogoPainter extends CustomPainter {
     canvas.drawPath(route, stroke..strokeWidth = 10);
     canvas.drawLine(const Offset(28, 30), const Offset(80, 30), stroke..strokeWidth = 11);
     canvas.drawCircle(const Offset(52, 86), 7, Paint()..color = AppColors.text);
-  }
-
-  @override
-  bool shouldRepaint(covariant _LogoPainter old) => old.bg != bg;
+    canvas.restore();
 }

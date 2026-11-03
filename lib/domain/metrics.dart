@@ -159,6 +159,12 @@ Duration maxSpeedWindow(SportType sport) => sport == SportType.cycling
 /// minimal [window] di dalam satu segmen (jeda pause tidak dihitung).
 /// Mengembalikan null bila data tidak cukup (mis. tanpa rute GPS).
 double? computeMaxSpeedMps(List<TrackPoint> pts, SportType sport,
+        {Duration? window}) =>
+    maxSpeedWithIndex(pts, sport, window: window)?.speed;
+
+/// Seperti [computeMaxSpeedMps], ditambah indeks titik akhir jendela tempat
+/// kecepatan maks terjadi (untuk menandainya di rute / video replay).
+({double speed, int index})? maxSpeedWithIndex(List<TrackPoint> pts, SportType sport,
     {Duration? window}) {
   final w = (window ?? maxSpeedWindow(sport)).inMilliseconds / 1000;
   if (pts.length < 2) return null;
@@ -178,6 +184,7 @@ double? computeMaxSpeedMps(List<TrackPoint> pts, SportType sport,
     }
   }
   double best = 0;
+  var bestIdx = 0;
   var j = 0;
   for (var i = 1; i < pts.length; i++) {
     if (seg[j] != seg[i]) j = i;
@@ -193,9 +200,12 @@ double? computeMaxSpeedMps(List<TrackPoint> pts, SportType sport,
     // Jendela terlalu pendek, atau ada celah data terlalu panjang.
     if (dt < w || dt > w * 4) continue;
     final v = (cum[i] - cum[j]) / dt;
-    if (v <= sport.maxPlausibleSpeed && v > best) best = v;
+    if (v <= sport.maxPlausibleSpeed && v > best) {
+      best = v;
+      bestIdx = i;
+    }
   }
-  return best > 0 ? best : null;
+  return best > 0 ? (speed: best, index: bestIdx) : null;
 }
 
 String formatSpeedKmh(double mps) =>

@@ -13,6 +13,7 @@ import '../domain/metrics.dart';
 import '../models/activity.dart';
 import '../widgets/share_card.dart';
 import 'home_screen.dart' show activityTitle;
+import 'replay_panel.dart';
 
 /// Membuka lembar "Bagikan aktivitas".
 Future<void> showShareSheet(
@@ -45,6 +46,7 @@ class _ShareSheetState extends State<ShareSheet> {
   bool _showHr = true;
   bool _hideEnds = false;
   bool _busy = false;
+  bool _video = false;
 
   late final List<RoutePoint> _route = [
     for (final p in widget.points) (lat: p.latitude, lon: p.longitude)
@@ -207,6 +209,14 @@ class _ShareSheetState extends State<ShareSheet> {
             ]),
             const SizedBox(height: 6),
             _segment([
+              ('Gambar', !_video, () => setState(() => _video = false)),
+              ('Video replay', _video, () => setState(() => _video = true)),
+            ]),
+            const SizedBox(height: 8),
+            if (_video)
+              ReplayPanel(activity: widget.activity, points: widget.points)
+            else ...[
+            _segment([
               ('Tanpa foto', !_withPhoto, () => setState(() => _withPhoto = false)),
               ('Dengan foto', _withPhoto, () => setState(() => _withPhoto = true)),
             ]),
@@ -322,6 +332,7 @@ class _ShareSheetState extends State<ShareSheet> {
             const Text('Lalu pilih WhatsApp, Instagram, atau aplikasi lain',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 12, color: AppColors.muted)),
+            ],
           ],
         ),
       ),

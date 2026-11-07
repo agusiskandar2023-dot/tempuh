@@ -14,6 +14,15 @@ Buka **Releases** di repo ini dari HP Android, unduh `Tempuh.apk` versi terbaru,
 (izinkan "Instal aplikasi tidak dikenal" untuk browser bila diminta). Setiap push ke `main` membuat
 rilis baru secara otomatis lewat GitHub Actions.
 
+## Baru di versi 0.8
+
+- **Program FM JAKIM 2027** (31 minggu, lari Selasa/Kamis/Sabtu/Minggu + kekuatan harian) di aplikasi
+  (kartu di Beranda) dan web (menu Program FM). Sesi tercentang otomatis dari aktivitas yang direkam;
+  catatan tersinkron HP ↔ web lewat Neon (tabel training_log, training_settings).
+- **Impor GPX, TCX, dan ZIP** (ekspor akun Strava atau Garmin) di aplikasi dan web, termasuk nama &
+  jenis aktivitas dari activities.csv Strava; aktivitas yang sudah ada dilewati.
+- Video replay dengan peta OpenStreetMap asli, rute memenuhi layar.
+
 ## Baru di versi 0.6
 
 - **Bagikan aktivitas** ke WhatsApp / Instagram / aplikasi lain: kartu persegi (chat & feed) atau story,

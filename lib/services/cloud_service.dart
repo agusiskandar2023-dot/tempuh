@@ -398,6 +398,13 @@ class CloudService extends ChangeNotifier {
         pulled++;
       }
 
+      // 4. Program latihan (catatan sesi & tanggal lomba), dua arah.
+      try {
+        if (await _syncTraining()) onTrainingChanged?.call();
+      } catch (e) {
+        debugPrint('Sinkron program latihan gagal: $e');
+      }
+
       lastSync = DateTime.now();
       await _storage.write(key: 'last_sync', value: lastSync!.toIso8601String());
       if (pulled > 0 || deleted > 0) onLocalChanged?.call();
@@ -413,6 +420,71 @@ class CloudService extends ChangeNotifier {
       await refreshPending();
       notifyListeners();
     }
+  }
+
+  /// Dipanggil bila catatan program latihan dari server berubah.
+  VoidCallback? onTrainingChanged;
+
+  Future<bool> _syncTraining() async {
+    var changed = false;
+    final st = await _db.trainingSettings();
+    if (st != null && st['synced'] == 0) {
+      final ms = st['updated_at'] as int;
+      await _api('/training_settings?on_conflict=user_id',
+          method: 'POST',
+          prefer: 'resolution=merge-duplicates,return=minimal',
+          body: {
+            'user_id': userId,
+            'race_date': st['race_date'],
+            'updated_at': DateTime.fromMillisecondsSinceEpoch(ms).toUtc().toIso8601String(),
+          });
+      await _db.markTrainingSettingsSynced(ms);
+    }
+    final rows = await _db.trainingRows(unsyncedOnly: true);
+    if (rows.isNotEmpty) {
+      await _api('/training_log?on_conflict=user_id,week,slot',
+          method: 'POST',
+          prefer: 'resolution=merge-duplicates,return=minimal',
+          body: [
+            for (final r in rows)
+              {
+                'user_id': userId,
+                'week': r['week'],
+                'slot': r['slot'],
+                'done': r['done'] == 1,
+                'km': r['km'],
+                'updated_at': DateTime.fromMillisecondsSinceEpoch(r['updated_at'] as int)
+                    .toUtc()
+                    .toIso8601String(),
+              }
+          ]);
+      for (final r in rows) {
+        await _db.markTrainingSynced(r['week'] as int, r['slot'] as String, r['updated_at'] as int);
+      }
+    }
+    final rs = await _api('/training_settings?select=race_date,updated_at') as List? ?? const [];
+    for (final m in rs.cast<Map<String, dynamic>>()) {
+      final before = await _db.trainingSettings();
+      await _db.putTrainingSettings(
+          '${m['race_date']}'.substring(0, 10), DateTime.parse('${m['updated_at']}'),
+          fromCloud: true);
+      final after = await _db.trainingSettings();
+      if (before?['race_date'] != after?['race_date']) changed = true;
+    }
+    final rl = await _api('/training_log?select=week,slot,done,km,updated_at') as List? ?? const [];
+    final local = {
+      for (final r in await _db.trainingRows()) '${r['week']}|${r['slot']}': r['updated_at'] as int
+    };
+    for (final m in rl.cast<Map<String, dynamic>>()) {
+      final at = DateTime.parse('${m['updated_at']}');
+      final key = '${m['week']}|${m['slot']}';
+      if ((local[key] ?? -1) >= at.millisecondsSinceEpoch) continue;
+      await _db.putTraining((m['week'] as num).toInt(), m['slot'] as String, m['done'] == true,
+          (m['km'] as num?)?.toDouble(), at,
+          fromCloud: true);
+      changed = true;
+    }
+    return changed;
   }
 
   static double _r(double v, int digits) {

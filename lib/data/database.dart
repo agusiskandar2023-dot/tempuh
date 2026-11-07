@@ -80,7 +80,7 @@ class AppDatabase {
     ));
   }
 
-  static const _schemaVersion = 4;
+  static const _schemaVersion = 5;
 
   /// Migrasi bertahap dari [from] ke versi terbaru. Hanya menambah.
   static Future<void> _migrate(Database db, int from) async {
@@ -98,6 +98,26 @@ class AppDatabase {
     if (from < 4) {
       // v4: kecepatan maksimum (diisi ulang dari titik rute untuk data lama).
       await db.execute('ALTER TABLE activities ADD COLUMN max_speed_mps REAL');
+    }
+    if (from < 5) {
+      // v5: catatan program latihan (FM) + pengaturannya.
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS training_log (
+          week INTEGER NOT NULL,
+          slot TEXT NOT NULL,
+          done INTEGER NOT NULL DEFAULT 0,
+          km REAL,
+          updated_at INTEGER NOT NULL,
+          synced INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (week, slot)
+        )''');
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS training_settings (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          race_date TEXT NOT NULL,
+          updated_at INTEGER NOT NULL,
+          synced INTEGER NOT NULL DEFAULT 0
+        )''');
     }
   }
 
@@ -283,6 +303,68 @@ class AppDatabase {
         "sync_status = CASE WHEN sync_status = 'synced' AND ? > 0 THEN 'pending' ELSE sync_status END "
         "WHERE id = ?",
         [mps, mps, id]);
+  }
+
+  // ---------------- Program latihan ----------------
+
+  Future<List<Map<String, Object?>>> trainingRows({bool unsyncedOnly = false}) async {
+    final d = await db;
+    return d.query('training_log', where: unsyncedOnly ? 'synced = 0' : null);
+  }
+
+  /// Menyimpan satu slot. [fromCloud]: data dari server (sudah tersinkron),
+  /// hanya dipakai bila lebih baru dari yang ada di HP.
+  Future<void> putTraining(int week, String slot, bool done, double? km, DateTime updatedAt,
+      {bool fromCloud = false}) async {
+    final d = await db;
+    final ms = updatedAt.millisecondsSinceEpoch;
+    if (fromCloud) {
+      final cur = await d.query('training_log',
+          where: 'week = ? AND slot = ?', whereArgs: [week, slot], limit: 1);
+      if (cur.isNotEmpty && (cur.first['updated_at'] as int) >= ms) return;
+    }
+    await d.insert(
+        'training_log',
+        {
+          'week': week,
+          'slot': slot,
+          'done': done ? 1 : 0,
+          'km': km,
+          'updated_at': ms,
+          'synced': fromCloud ? 1 : 0,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<void> markTrainingSynced(int week, String slot, int updatedAtMs) async {
+    final d = await db;
+    await d.update('training_log', {'synced': 1},
+        where: 'week = ? AND slot = ? AND updated_at = ?', whereArgs: [week, slot, updatedAtMs]);
+  }
+
+  Future<Map<String, Object?>?> trainingSettings() async {
+    final d = await db;
+    final r = await d.query('training_settings', where: 'id = 1', limit: 1);
+    return r.isEmpty ? null : r.first;
+  }
+
+  Future<void> putTrainingSettings(String raceDate, DateTime updatedAt,
+      {bool fromCloud = false}) async {
+    final d = await db;
+    final ms = updatedAt.millisecondsSinceEpoch;
+    if (fromCloud) {
+      final cur = await trainingSettings();
+      if (cur != null && (cur['updated_at'] as int) >= ms) return;
+    }
+    await d.insert('training_settings',
+        {'id': 1, 'race_date': raceDate, 'updated_at': ms, 'synced': fromCloud ? 1 : 0},
+        conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<void> markTrainingSettingsSynced(int updatedAtMs) async {
+    final d = await db;
+    await d.update('training_settings', {'synced': 1},
+        where: 'id = 1 AND updated_at = ?', whereArgs: [updatedAtMs]);
   }
 
   /// Menghapus aktivitas lokal. Bila sudah pernah tersinkron, catat agar

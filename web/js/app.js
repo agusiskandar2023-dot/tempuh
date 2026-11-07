@@ -1,6 +1,8 @@
 import { WEEKLY_TARGET_KM } from '../config.js';
 import { signIn, signUp, signOut, currentUser, api, ApiError } from './neon.js';
-import { parseFit, FitError } from './fit.js';
+import { FitError } from './fit.js';
+import { parseTrackBytes, readZip } from './tracks.js';
+import { renderTraining } from './training.js';
 import {
   SPORTS, fmtKm, fmtDuration, fmtPace, perf, computeSplits, routeDistance,
   elevationGain, estimateCalories, computeMaxSpeed, fmtKmh,
@@ -133,6 +135,7 @@ function route() {
   if (page === 'riwayat') renderHistory(view);
   else if (page === 'aktivitas' && arg) renderDetail(view, arg);
   else if (page === 'upload') renderUpload(view);
+  else if (page === 'program') renderTraining(view, { state, api, esc, friendlyError });
   else renderDashboard(view);
   window.scrollTo(0, 0);
 }
@@ -835,18 +838,18 @@ async function stableUuid(text) {
 
 function renderUpload(view) {
   view.innerHTML = `
-    <h2 class="page">Upload dari Garmin</h2>
-    <p class="sub">Masukkan file .FIT; rute, jarak, waktu, dan detak jantung tersimpan ke akun Anda.</p>
+    <h2 class="page">Upload & impor</h2>
+    <p class="sub">File .FIT, .GPX, .TCX, atau .ZIP dari Garmin, Strava, dan aplikasi lain. Rute, jarak, waktu, dan detak jantung tersimpan ke akun Anda.</p>
     <label class="drop" id="drop" for="file">
       <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="#A3E635" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
-      <h3>Tarik file .FIT ke sini</h3>
+      <h3>Tarik file ke sini</h3>
       <div class="muted">atau klik untuk memilih (bisa beberapa file sekaligus)</div>
-      <input id="file" type="file" accept=".fit,.FIT" multiple hidden>
+      <input id="file" type="file" accept=".fit,.FIT,.gpx,.GPX,.tcx,.TCX,.zip,.ZIP,.gz" multiple hidden>
     </label>
     <ol class="steps">
-      <li>Buka <a href="https://connect.garmin.com/modern/activities" target="_blank" rel="noopener">Garmin Connect</a> di browser, pilih aktivitas.</li>
-      <li>Klik ikon gerigi › <b>Export Original</b>, lalu ekstrak file .zip yang terunduh.</li>
-      <li>Masukkan file <b>.fit</b> di atas. Upload ulang file yang sama tidak membuat data ganda.</li>
+      <li><b>Garmin:</b> buka <a href="https://connect.garmin.com/modern/activities" target="_blank" rel="noopener">Garmin Connect</a>, pilih aktivitas, ikon gerigi › <b>Export Original</b>. File .zip-nya bisa langsung dimasukkan.</li>
+      <li><b>Strava:</b> <a href="https://www.strava.com/athlete/delete_your_account" target="_blank" rel="noopener">Settings › My Account › Download or Delete Your Account</a> › <b>Request your archive</b>. Masukkan file .zip dari email Strava; semua lari, jalan, dan sepeda dibaca beserta namanya.</li>
+      <li>Aktivitas yang sudah ada dilewati, jadi aman diunggah ulang.</li>
     </ol>
     <div id="up-list" class="list section-gap"></div>
     <div class="toolbar" id="up-bar" hidden>
@@ -866,19 +869,37 @@ function renderUpload(view) {
 }
 
 async function addFiles(files) {
-  for (const file of files) {
-    const u = { name: file.name, status: 'wait', note: 'Membaca…' };
+  const known = new Set(state.activities.map((a) => a.id));
+  const push = async (name, fit, err, skipped) => {
+    const u = { name };
+    if (skipped) { u.status = 'skip'; u.note = 'Bukan lari/jalan/sepeda'; }
+    else if (err) { u.status = 'err'; u.note = err; }
+    else {
+      u.fit = fit;
+      u.id = await stableUuid(`tempuh:fit:${state.user.id}:${Math.floor(fit.startTime.getTime() / 1000)}`);
+      if (known.has(u.id)) { u.status = 'skip'; u.note = 'Sudah ada'; }
+      else { u.status = 'ready'; u.note = 'Siap disimpan'; known.add(u.id); }
+    }
     state.uploads.push(u);
+  };
+  for (const file of files) {
+    const reading = { name: file.name, status: 'wait', note: 'Membaca…' };
+    state.uploads.push(reading);
     drawUploads();
     try {
-      const fit = parseFit(await file.arrayBuffer());
-      if (!fit.startTime) throw new FitError('Waktu mulai tidak ditemukan');
-      u.fit = fit;
-      u.status = 'ready';
-      u.note = 'Siap disimpan';
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      state.uploads.splice(state.uploads.indexOf(reading), 1);
+      if (file.name.toLowerCase().endsWith('.zip')) {
+        const items = readZip(bytes);
+        if (!items.length) await push(file.name, null, 'ZIP tidak berisi file aktivitas (.fit/.gpx/.tcx)');
+        for (const it of items) await push(it.name.split('/').pop(), it.fit, it.error, it.skipped);
+      } else {
+        await push(file.name, parseTrackBytes(file.name, bytes));
+      }
     } catch (e) {
-      u.status = 'err';
-      u.note = e instanceof FitError ? e.message : `Gagal dibaca: ${e.message}`;
+      reading.status = 'err';
+      reading.note = e instanceof FitError ? e.message : `Gagal dibaca: ${e.message}`;
+      if (!state.uploads.includes(reading)) state.uploads.push(reading);
     }
     drawUploads();
   }
@@ -892,10 +913,10 @@ function drawUploads() {
     const meta = f
       ? `${SPORTS[f.sport].label} · ${fmtKm(f.totalDistanceMeters ?? routeDistance(f.points))} km · ${fmtDuration(f.totalTimerSeconds ?? f.totalElapsedSeconds ?? 0)} · ${esc(dateFmt.format(f.startTime))}${f.avgHeartRate ? ` · ${f.avgHeartRate} bpm` : ''} · ${f.points.length} titik GPS`
       : '';
-    const cls = u.status === 'done' ? 'ok' : u.status === 'err' ? 'err' : 'wait';
+    const cls = u.status === 'done' ? 'ok' : u.status === 'err' ? 'err' : u.status === 'skip' ? 'skip' : 'wait';
     return `<div class="upload-row">
       <span class="icon-tile">${icon(f?.sport || 'running')}</span>
-      <div class="item-body"><div class="item-title">${esc(u.name)}</div><div class="item-meta">${meta}</div></div>
+      <div class="item-body"><div class="item-title">${esc(f?.title || u.name)}</div><div class="item-meta">${meta}</div></div>
       <span class="status ${cls}">${esc(u.note)}</span>
     </div>`;
   }).join('');
@@ -908,7 +929,7 @@ function drawUploads() {
 async function saveFit(u) {
   const f = u.fit;
   const start = f.startTime;
-  const id = await stableUuid(`tempuh:fit:${state.user.id}:${Math.floor(start.getTime() / 1000)}`);
+  const id = u.id || await stableUuid(`tempuh:fit:${state.user.id}:${Math.floor(start.getTime() / 1000)}`);
   const pts = f.points;
   const elapsed = Math.round(f.totalElapsedSeconds ?? (pts.length > 1 ? (pts.at(-1).recorded_at - pts[0].recorded_at) / 1000 : 0));
   const moving = Math.min(elapsed || Infinity, Math.round(f.totalTimerSeconds ?? elapsed));
@@ -937,6 +958,7 @@ async function saveFit(u) {
     source: 'fit_file',
     source_device: f.isGarmin ? 'Garmin' : u.name,
   };
+  if (f.title) activity.title = f.title;
   await api('/activities?on_conflict=id', {
     method: 'POST',
     prefer: 'resolution=merge-duplicates,return=minimal',

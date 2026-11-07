@@ -13,6 +13,7 @@ import '../services/cloud_service.dart';
 import '../widgets/route_thumbnail.dart';
 import 'account_screen.dart';
 import 'activity_detail_screen.dart';
+import 'training_screen.dart';
 
 /// Target jarak bawaan (km) per periode; bisa diubah dari Beranda.
 const defaultTargetsKm = {
@@ -241,6 +242,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
                 ),
               ),
+              const SizedBox(height: 12),
+              const TrainingHomeCard(),
               const SizedBox(height: 16),
               SizedBox(
                 height: 58,

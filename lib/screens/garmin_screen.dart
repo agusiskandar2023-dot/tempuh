@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:archive/archive_io.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -9,6 +12,7 @@ import '../domain/metrics.dart';
 import '../models/activity.dart';
 import '../services/fit_parser.dart';
 import '../services/health_service.dart';
+import '../services/track_import.dart';
 import 'activity_detail_screen.dart';
 
 /// Integrasi Garmin Forerunner:
@@ -25,6 +29,7 @@ class GarminScreen extends StatefulWidget {
 class _GarminScreenState extends State<GarminScreen> {
   List<ExternalWorkout>? _workouts;
   final Set<String> _imported = {};
+  String? _progress;
   bool _busy = false;
   String? _message;
 
@@ -97,61 +102,87 @@ class _GarminScreenState extends State<GarminScreen> {
         SnackBar(content: Text('${w.sport.label} diimpor ke Riwayat.')));
   }
 
-  Future<void> _importFit() async {
+  Future<void> _importFile() async {
     final store = context.read<ActivityStore>();
     final messenger = ScaffoldMessenger.of(context);
     final res = await FilePicker.platform.pickFiles(
       type: FileType.any,
-      withData: true,
+      allowMultiple: true,
+      withData: false,
+      withReadStream: false,
     );
-    final file = res?.files.single;
-    final bytes = file?.bytes;
-    if (file == null || bytes == null) return;
-    setState(() => _busy = true);
+    final files = res?.files ?? const <PlatformFile>[];
+    if (files.isEmpty) return;
+    setState(() {
+      _busy = true;
+      _progress = null;
+    });
+    var added = 0, existed = 0, failed = 0, skipped = 0;
+    String? lastId;
+
+    Future<void> save(ImportedTrack t, {bool replace = false}) async {
+      if (await store.exists(t.id)) {
+        if (!replace) {
+          existed++;
+          return;
+        }
+        await store.delete(t.id);
+      }
+      await store.save(t.toActivity(), t.data.points);
+      lastId = t.id;
+      added++;
+      if (mounted) setState(() => _progress = '$added aktivitas diimpor…');
+    }
+
     try {
-      final fit = FitParser.parse(bytes);
-      final start = fit.startTime ??
-          (fit.points.isNotEmpty ? fit.points.first.recordedAt : DateTime.now());
-      final id = 'fit-${start.toUtc().millisecondsSinceEpoch ~/ 1000}';
-      final calc = MetricsCalculator(fit.sport)..restore(fit.points);
-      final elapsed = (fit.totalElapsedSeconds ??
-              (fit.points.length >= 2
-                  ? fit.points.last.recordedAt
-                      .difference(fit.points.first.recordedAt)
-                      .inSeconds
-                  : 0))
-          .round();
-      final moving = (fit.totalTimerSeconds ?? elapsed).round();
-      final dist = fit.totalDistanceMeters ?? calc.distanceMeters;
-      final a = Activity(
-        id: id,
-        sport: fit.sport,
-        startedAt: start,
-        finishedAt: start.add(Duration(seconds: elapsed)),
-        status: ActivityStatus.finished,
-        elapsedSeconds: elapsed,
-        movingSeconds: moving,
-        pausedSeconds: (elapsed - moving).clamp(0, elapsed),
-        distanceMeters: dist,
-        elevationGainMeters: fit.totalAscentMeters ?? calc.elevationGainMeters,
-        avgHeartRate: fit.avgHeartRate,
-        maxHeartRate: fit.maxHeartRate,
-        caloriesEstimated: fit.totalCalories ??
-            estimateCalories(fit.sport, moving, moving > 0 ? dist / moving * 3.6 : 0),
-        source: ActivitySource.fitFile,
-        sourceDevice: fit.isGarmin ? 'Garmin' : file.name,
-      );
-      if (await store.exists(id)) await store.delete(id);
-      await store.save(a, fit.points);
+      for (final f in files) {
+        final path = f.path;
+        final name = f.name;
+        if (name.toLowerCase().endsWith('.zip')) {
+          if (path == null) throw ImportException('File ZIP tidak bisa dibuka.');
+          final input = InputFileStream(path);
+          try {
+            final archive = ZipDecoder().decodeStream(input);
+            final r = await readZip(archive, (t) => save(t));
+            failed += r.failed;
+            skipped += r.skipped;
+          } finally {
+            await input.close();
+          }
+        } else {
+          try {
+            final bytes = f.bytes ?? await File(path!).readAsBytes();
+            await save(parseTrackFile(name, bytes), replace: files.length == 1);
+          } catch (e) {
+            if (files.length == 1) rethrow;
+            failed++;
+          }
+        }
+      }
       if (!mounted) return;
-      Navigator.of(context).push(MaterialPageRoute(
-          builder: (_) => ActivityDetailScreen(activityId: id)));
+      if (files.length == 1 && added == 1 && !files.single.name.toLowerCase().endsWith('.zip')) {
+        Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => ActivityDetailScreen(activityId: lastId!)));
+      } else {
+        final parts = [
+          '$added diimpor',
+          if (existed > 0) '$existed sudah ada',
+          if (skipped > 0) '$skipped bukan lari/jalan/sepeda',
+          if (failed > 0) '$failed gagal dibaca',
+        ];
+        messenger.showSnackBar(SnackBar(content: Text('Impor selesai: ${parts.join(', ')}.')));
+      }
     } on FitFormatException catch (e) {
       messenger.showSnackBar(SnackBar(content: Text(e.toString())));
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('Gagal impor: $e')));
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _progress = null;
+        });
+      }
     }
   }
 
@@ -297,12 +328,15 @@ class _GarminScreenState extends State<GarminScreen> {
                   const Row(children: [
                     Icon(Icons.route, color: AppColors.lime),
                     SizedBox(width: 10),
-                    Text('Impor file .FIT (dengan rute)',
+                    Text('Impor file (dengan rute)',
                         style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
                   ]),
                   const SizedBox(height: 8),
                   const Text(
-                    'Garmin Connect web › aktivitas › ikon gerigi › Export Original. Ekstrak .zip, lalu pilih file .fit.',
+                    'Format .FIT, .GPX, .TCX, atau .ZIP (boleh beberapa file sekaligus).\n'
+                    '• Garmin Connect web › aktivitas › ikon gerigi › Export Original.\n'
+                    '• Strava: Settings › My Account › Download or Delete Your Account › Request your archive. '
+                    'Pilih ZIP dari email Strava; semua lari, jalan, dan sepeda masuk sekaligus, yang sudah ada dilewati.',
                     style: TextStyle(fontSize: 13, height: 1.5, color: AppColors.muted),
                   ),
                   const SizedBox(height: 12),
@@ -312,8 +346,8 @@ class _GarminScreenState extends State<GarminScreen> {
                       style: FilledButton.styleFrom(
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(14))),
-                      onPressed: _busy ? null : _importFit,
-                      child: const Text('Pilih file .FIT',
+                      onPressed: _busy ? null : _importFile,
+                      child: const Text('Pilih file',
                           style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
                     ),
                   ),
@@ -321,9 +355,15 @@ class _GarminScreenState extends State<GarminScreen> {
               ),
             ),
             if (_busy)
-              const Padding(
-                padding: EdgeInsets.all(24),
-                child: Center(child: CircularProgressIndicator()),
+              Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(children: [
+                  const CircularProgressIndicator(),
+                  if (_progress != null) ...[
+                    const SizedBox(height: 10),
+                    Text(_progress!, style: const TextStyle(color: AppColors.muted)),
+                  ],
+                ]),
               ),
             const SizedBox(height: 24),
             const Center(

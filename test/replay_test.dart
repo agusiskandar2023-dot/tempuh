@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:movetrack_ai/domain/replay.dart';
 import 'package:movetrack_ai/models/activity.dart';
+import 'package:movetrack_ai/services/replay_map.dart';
 
 TrackPoint pt(int seq, int sec, double northMeters, {bool seg = false}) => TrackPoint(
       sequenceNo: seq,
@@ -61,5 +62,23 @@ void main() {
     const b = ReplayTimeline(30);
     expect(b.finalStart, b.routeEnd);
     expect(b.timeAtFraction(0.5), closeTo((b.introEnd + b.routeEnd) / 2, 1e-9));
+  });
+
+  test('peta: rute memenuhi kotak layar, ubin menutup seluruh frame', () {
+    final pts = [for (var i = 0; i <= 600; i++) pt(i, i, i * 3.0)];
+    final d = ReplayData.build(act, pts);
+    final v = ReplayMapView.fit(d);
+    final first = v.toLogical(d.lat.first, d.lon.first);
+    final last = v.toLogical(d.lat.last, d.lon.last);
+    expect((first.dy - last.dy).abs(), closeTo(replayRouteBox.height, 1));
+    expect(replayRouteBox.inflate(1).contains(first), isTrue);
+    expect(replayRouteBox.inflate(1).contains(last), isTrue);
+    final tiles = v.tiles();
+    final cover = tiles.map((t) => t.rect).reduce((a, b) => a.expandToInclude(b));
+    expect(cover.left, lessThanOrEqualTo(0));
+    expect(cover.top, lessThanOrEqualTo(0));
+    expect(cover.right, greaterThanOrEqualTo(replayFrame.width));
+    expect(cover.bottom, greaterThanOrEqualTo(replayFrame.height));
+    expect(tiles.length, lessThan(60));
   });
 }

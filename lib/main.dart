@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'core/theme.dart';
 import 'data/activity_store.dart';
 import 'data/database.dart';
+import 'data/training_store.dart';
 import 'models/activity.dart';
 import 'screens/activity_detail_screen.dart';
 import 'screens/garmin_screen.dart';
@@ -39,6 +40,13 @@ class TempuhApp extends StatelessWidget {
           store.onChanged = cloud.requestSync;
           cloud.onLocalChanged = store.reload;
           return store..reload();
+        }),
+        ChangeNotifierProvider(create: (ctx) {
+          final cloud = ctx.read<CloudService>();
+          final training = TrainingStore();
+          training.onChanged = cloud.requestSync;
+          cloud.onTrainingChanged = training.reload;
+          return training..reload();
         }),
         Provider(create: (_) => HealthService()),
       ],

@@ -206,16 +206,27 @@ String _unescape(String s) => s
     .replaceAll('&apos;', "'")
     .replaceAll('&#39;', "'");
 
-/// Satu file (bukan ZIP). [name] menentukan format; .gz dibuka otomatis.
+/// Jenis file dari isinya; nama bisa berubah saat diunduh ulang ("x.gpx-2").
+String? sniffTrack(Uint8List b, [String name = '']) {
+  if (b.length >= 4 && b[0] == 0x50 && b[1] == 0x4b && b[2] == 0x03 && b[3] == 0x04) return 'zip';
+  if (b.length >= 2 && b[0] == 0x1f && b[1] == 0x8b) return 'gz';
+  if (b.length >= 12 && String.fromCharCodes(b.sublist(8, 12)) == '.FIT') return 'fit';
+  final head = utf8.decode(b.length > 4096 ? b.sublist(0, 4096) : b, allowMalformed: true).toLowerCase();
+  if (head.contains('<gpx')) return 'gpx';
+  if (head.contains('<trainingcenterdatabase')) return 'tcx';
+  return RegExp(r'\.(fit|gpx|tcx|zip)').firstMatch(name.toLowerCase())?.group(1);
+}
+
+/// Satu file (bukan ZIP). Formatnya dikenali dari isi file; .gz dibuka otomatis.
 ImportedTrack parseTrackFile(String name, Uint8List bytes, {SportType? sport, String? title}) {
-  var n = name.toLowerCase();
   var data = bytes;
-  if (n.endsWith('.gz')) {
+  var n = sniffTrack(data, name);
+  if (n == 'gz') {
     data = Uint8List.fromList(gzip.decode(bytes));
-    n = n.substring(0, n.length - 3);
+    n = sniffTrack(data, name.replaceAll(RegExp(r'\.gz$', caseSensitive: false), ''));
   }
   final base = name.split('/').last;
-  if (n.endsWith('.fit')) {
+  if (n == 'fit') {
     var fit = FitParser.parse(data);
     if (sport != null && sport != fit.sport) {
       fit = FitActivity(
@@ -236,15 +247,15 @@ ImportedTrack parseTrackFile(String name, Uint8List bytes, {SportType? sport, St
     return ImportedTrack(fit, base, title: title);
   }
   final text = utf8.decode(data, allowMalformed: true);
-  if (n.endsWith('.gpx')) {
+  if (n == 'gpx') {
     final r = parseGpx(text, sport: sport);
     return ImportedTrack(r.data, base, title: title ?? r.title);
   }
-  if (n.endsWith('.tcx')) {
+  if (n == 'tcx') {
     final r = parseTcx(text.trimLeft(), sport: sport);
     return ImportedTrack(r.data, base, title: title ?? r.title);
   }
-  throw ImportException('Format $base tidak didukung. Pakai .fit, .gpx, .tcx, atau .zip.');
+  throw ImportException('Isi $base bukan aktivitas (.fit, .gpx, .tcx, atau .zip).');
 }
 
 /// Baris CSV sederhana (mendukung tanda kutip & koma di dalam kutip).
@@ -312,10 +323,8 @@ Map<String, ({String? title, SportType? sport, bool skip})> stravaMeta(String cs
   return out;
 }
 
-bool isTrackFileName(String n) {
-  final l = n.toLowerCase();
-  return ['.fit', '.gpx', '.tcx', '.fit.gz', '.gpx.gz', '.tcx.gz'].any(l.endsWith);
-}
+bool isTrackFileName(String n) => RegExp(r'\.(fit|gpx|tcx)(\.gz)?(-\d+)?$', caseSensitive: false)
+    .hasMatch(n.replaceAll(RegExp(r' \(\d+\)(?=\.)'), ''));
 
 /// Membuka ZIP (misalnya ekspor akun Strava atau Garmin). [onTrack]
 /// dipanggil untuk tiap aktivitas yang berhasil dibaca; file yang gagal

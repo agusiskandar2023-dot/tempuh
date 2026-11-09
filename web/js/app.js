@@ -1,7 +1,7 @@
 import { WEEKLY_TARGET_KM } from '../config.js';
 import { signIn, signUp, signOut, currentUser, api, ApiError } from './neon.js';
 import { FitError } from './fit.js';
-import { parseTrackBytes, readZip } from './tracks.js';
+import { parseTrackBytes, readZip, sniff } from './tracks.js';
 import { renderTraining } from './training.js';
 import {
   SPORTS, fmtKm, fmtDuration, fmtPace, perf, computeSplits, routeDistance,
@@ -889,12 +889,16 @@ async function addFiles(files) {
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
       state.uploads.splice(state.uploads.indexOf(reading), 1);
-      if (file.name.toLowerCase().endsWith('.zip')) {
-        const items = readZip(bytes);
+      if (sniff(bytes, file.name) === 'zip') {
+        reading.note = 'Membuka ZIP…';
+        state.uploads.push(reading);
+        drawUploads();
+        const items = await readZip(bytes);
+        state.uploads.splice(state.uploads.indexOf(reading), 1);
         if (!items.length) await push(file.name, null, 'ZIP tidak berisi file aktivitas (.fit/.gpx/.tcx)');
         for (const it of items) await push(it.name.split('/').pop(), it.fit, it.error, it.skipped);
       } else {
-        await push(file.name, parseTrackBytes(file.name, bytes));
+        await push(file.name, await parseTrackBytes(file.name, bytes));
       }
     } catch (e) {
       reading.status = 'err';

@@ -4,6 +4,35 @@ import { parseFit, FitError } from './fit.js';
 
 const GAP_SECONDS = 60; // jeda lebih lama dari ini dianggap pause
 
+// fflate (unzip/gunzip) hanya dimuat saat dibutuhkan agar halaman tetap cepat.
+let fflateLoading = null;
+export function loadFflate() {
+  if (typeof fflate !== 'undefined') return Promise.resolve(fflate);
+  if (!fflateLoading) {
+    fflateLoading = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/fflate@0.8.2/umd/index.js';
+      const timer = setTimeout(() => reject(new FitError('Pustaka unzip lambat dimuat. Periksa internet lalu coba lagi.')), 20000);
+      s.onload = () => { clearTimeout(timer); resolve(window.fflate); };
+      s.onerror = () => { clearTimeout(timer); fflateLoading = null; reject(new FitError('Pustaka unzip gagal dimuat. Periksa internet lalu coba lagi.')); };
+      document.head.appendChild(s);
+    });
+  }
+  return fflateLoading;
+}
+
+/** Jenis file dari isinya (bukan dari nama, yang bisa berubah jadi "x.gpx-2"). */
+export function sniff(bytes, name = '') {
+  if (bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && bytes[2] === 0x03 && bytes[3] === 0x04) return 'zip';
+  if (bytes.length >= 2 && bytes[0] === 0x1f && bytes[1] === 0x8b) return 'gz';
+  if (bytes.length >= 12 && String.fromCharCode(bytes[8], bytes[9], bytes[10], bytes[11]) === '.FIT') return 'fit';
+  const head = new TextDecoder().decode(bytes.subarray(0, 4096)).toLowerCase();
+  if (head.includes('<gpx')) return 'gpx';
+  if (head.includes('<trainingcenterdatabase')) return 'tcx';
+  const m = name.toLowerCase().match(/\.(fit|gpx|tcx|zip)(?:\.gz)?/);
+  return m ? m[1] : null;
+}
+
 export function sportFromText(s) {
   if (s == null) return null;
   const t = String(s).trim().toLowerCase();
@@ -113,29 +142,29 @@ export function parseTcx(text, sportHint) {
 }
 
 export function isTrackName(n) {
-  const l = n.toLowerCase();
-  return ['.fit', '.gpx', '.tcx', '.fit.gz', '.gpx.gz', '.tcx.gz'].some((x) => l.endsWith(x));
+  // Termasuk nama yang diubah browser/OS saat unduh ulang: "lari.gpx-2", "lari (1).gpx".
+  return /\.(fit|gpx|tcx)(\.gz)?(-\d+)?$/i.test(n.replace(/ \(\d+\)(?=\.)/, ''));
 }
 
-/** Membaca satu file non-ZIP. `bytes`: Uint8Array. */
-export function parseTrackBytes(name, bytes, { sport = null, title = null } = {}) {
-  let n = name.toLowerCase();
+/** Membaca satu file non-ZIP. `bytes`: Uint8Array. Formatnya dikenali dari isi file. */
+export async function parseTrackBytes(name, bytes, { sport = null, title = null } = {}) {
   let data = bytes;
-  if (n.endsWith('.gz')) {
-    if (typeof fflate === 'undefined') throw new FitError('Pustaka unzip gagal dimuat.');
-    data = fflate.gunzipSync(bytes);
-    n = n.slice(0, -3);
+  let kind = sniff(data, name);
+  if (kind === 'gz') {
+    const ff = await loadFflate();
+    data = ff.gunzipSync(bytes);
+    kind = sniff(data, name.replace(/\.gz$/i, ''));
   }
   let f;
-  if (n.endsWith('.fit')) {
+  if (kind === 'fit') {
     f = parseFit(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength));
     if (sport) f.sport = sport;
-  } else if (n.endsWith('.gpx')) {
+  } else if (kind === 'gpx') {
     f = parseGpx(new TextDecoder().decode(data), sport);
-  } else if (n.endsWith('.tcx')) {
+  } else if (kind === 'tcx') {
     f = parseTcx(new TextDecoder().decode(data), sport);
   } else {
-    throw new FitError('Format tidak didukung. Pakai .fit, .gpx, .tcx, atau .zip.');
+    throw new FitError('Isi file bukan aktivitas (.fit, .gpx, .tcx, atau .zip).');
   }
   if (title) f.title = title;
   if (!f.startTime) throw new FitError('Waktu mulai tidak ditemukan');
@@ -179,9 +208,9 @@ export function stravaMeta(csv) {
 }
 
 /** Membuka ZIP; mengembalikan daftar {name, fit | error | skipped}. */
-export function readZip(bytes) {
-  if (typeof fflate === 'undefined') throw new FitError('Pustaka unzip gagal dimuat.');
-  const files = fflate.unzipSync(bytes, {
+export async function readZip(bytes) {
+  const ff = await loadFflate();
+  const files = ff.unzipSync(bytes, {
     filter: (f) => isTrackName(f.name) || f.name.toLowerCase().endsWith('activities.csv'),
   });
   const csvName = Object.keys(files).find((n) => n.toLowerCase().endsWith('activities.csv'));
@@ -192,7 +221,7 @@ export function readZip(bytes) {
     const m = meta[name] || Object.entries(meta).find(([k]) => name.endsWith(k))?.[1];
     if (m?.skip) { out.push({ name, skipped: true }); continue; }
     try {
-      out.push({ name, fit: parseTrackBytes(name, data, { sport: m?.sport, title: m?.title }) });
+      out.push({ name, fit: await parseTrackBytes(name, data, { sport: m?.sport, title: m?.title }) });
     } catch (e) {
       out.push({ name, error: e instanceof FitError ? e.message : `Gagal dibaca: ${e.message}` });
     }

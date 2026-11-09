@@ -67,4 +67,12 @@ void main() {
   test('format tidak dikenal ditolak dengan pesan jelas', () {
     expect(() => parseTrackFile('x.kml', Uint8List(0)), throwsA(isA<ImportException>()));
   });
+
+  test('nama file berubah saat unduh ulang (x.gpx-2) tetap terbaca dari isinya', () {
+    final t = parseTrackFile('Morning_Run.gpx-2', Uint8List.fromList(utf8.encode(gpx)));
+    expect(t.data.points.length, 3);
+    expect(isTrackFileName('activities/Lari.gpx-2'), isTrue);
+    expect(isTrackFileName('activities/Lari (1).gpx'), isTrue);
+    expect(isTrackFileName('media/foto.jpg'), isFalse);
+  });
 }

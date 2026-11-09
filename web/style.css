@@ -122,7 +122,7 @@ footer { text-align: center; color: var(--muted); font-size: 12px; padding: 8px 
 .leaflet-container { background: #141d31; font-family: inherit; }
 
 /* ---------- Upload ---------- */
-.drop { border: 2px dashed #3b4a6b; border-radius: 20px; padding: 40px 20px; text-align: center; background: var(--charcoal); transition: border-color 0.15s; }
+.drop { display: block; cursor: pointer; border: 2px dashed #3b4a6b; border-radius: 20px; padding: 40px 20px; text-align: center; background: var(--charcoal); transition: border-color 0.15s; }
 .drop.over { border-color: var(--lime); background: #1a2640; }
 .drop h3 { margin: 12px 0 4px; font-size: 18px; }
 .steps { color: var(--muted); font-size: 14px; margin: 16px 0 0; padding-left: 18px; }

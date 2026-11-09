@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:archive/archive_io.dart';
 import 'package:file_picker/file_picker.dart';
@@ -138,7 +139,10 @@ class _GarminScreenState extends State<GarminScreen> {
       for (final f in files) {
         final path = f.path;
         final name = f.name;
-        if (name.toLowerCase().endsWith('.zip')) {
+        final head = path != null
+            ? await File(path).openRead(0, 4096).fold<List<int>>([], (a, b) => a..addAll(b))
+            : (f.bytes ?? const <int>[]);
+        if (sniffTrack(Uint8List.fromList(head), name) == 'zip') {
           if (path == null) throw ImportException('File ZIP tidak bisa dibuka.');
           final input = InputFileStream(path);
           try {
@@ -160,7 +164,7 @@ class _GarminScreenState extends State<GarminScreen> {
         }
       }
       if (!mounted) return;
-      if (files.length == 1 && added == 1 && !files.single.name.toLowerCase().endsWith('.zip')) {
+      if (files.length == 1 && added == 1 && lastId != null && existed == 0 && failed == 0 && skipped == 0) {
         Navigator.of(context).push(MaterialPageRoute(
             builder: (_) => ActivityDetailScreen(activityId: lastId!)));
       } else {
